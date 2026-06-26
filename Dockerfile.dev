@@ -1,0 +1,32 @@
+# Development image. Unlike the production Dockerfile (which builds a slim
+# release), this keeps the full Elixir toolchain around so we get compilation,
+# code reloading, and the asset watchers while we work.
+ARG ELIXIR_VERSION=1.19.5
+ARG OTP_VERSION=28.3.1
+ARG DEBIAN_VERSION=trixie-20260610-slim
+ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
+
+FROM ${BUILDER_IMAGE}
+
+# build-essential + git for native deps, inotify-tools so Phoenix live reload
+# can watch files for changes.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential git inotify-tools \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN mix local.hex --force && mix local.rebar --force
+
+ENV MIX_ENV=dev
+
+WORKDIR /app
+
+# Pull deps in their own layer so they're cached unless mix.exs/mix.lock change.
+# At runtime the source is bind-mounted over /app, but deps and _build live in
+# named volumes (see docker-compose.yml), so what we fetch here is what runs.
+COPY mix.exs mix.lock ./
+RUN mix deps.get
+
+EXPOSE 4000
+
+# Overridden by the compose file, but a sensible default if run on its own.
+CMD ["mix", "phx.server"]

@@ -1,0 +1,60 @@
+# Development stack: Postgres + the Phoenix app running in dev mode with code
+# reloading. This is the default compose file, so `docker compose up` just works.
+#
+#   cp .env.example .env   # tweak if you like, the defaults are fine for dev
+#   docker compose up
+#
+# Then visit http://localhost:4000.
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATABASE_NAME:-financial_tracking_dev}
+    ports:
+      # Exposed so you can poke at the DB from the host with psql/a GUI.
+      - "5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # Make sure deps are current, set up the DB, then start the server.
+    command: >
+      sh -c "mix deps.get &&
+             mix ecto.create &&
+             mix ecto.migrate &&
+             mix phx.server"
+    environment:
+      MIX_ENV: dev
+      DATABASE_HOST: db
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      DATABASE_NAME: ${DATABASE_NAME:-financial_tracking_dev}
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    volumes:
+      # Live source for code reloading...
+      - .:/app
+      # ...but keep deps and build artifacts in the container so the Linux
+      # binaries don't clash with whatever is on the (possibly Windows) host.
+      - deps:/app/deps
+      - build:/app/_build
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata_dev:
+  deps:
+  build:
