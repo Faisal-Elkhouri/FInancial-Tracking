@@ -13,8 +13,9 @@ defmodule FinancialTracking.Tracker.Offices do
   @doc false
   def changeset(offices, attrs) do
     offices
-    |> cast(attrs, [:name])
+    |> cast(attrs, [:name, :parent_id])
     |> validate_required([:name])
     |> unique_constraint(:name)
+    |> foreign_key_constraint(:parent_id)
   end
 end
