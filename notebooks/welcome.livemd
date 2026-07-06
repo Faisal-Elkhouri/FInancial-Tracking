@@ -1,0 +1,27 @@
+# Financial Tracking — Livebook
+
+## Connecting to the running app
+
+This Livebook runs in Docker alongside the Phoenix dev server. To run code on the
+**live application node** (so you can query the database and call app modules):
+
+1. Click **Runtime settings** (top-right, the runtime indicator).
+2. Choose **Attached node**.
+3. Fill in:
+   - **Name:** `financial_tracking@web.local`
+   - **Cookie:** the value of `LIVEBOOK_COOKIE` (default `financial_tracking_cookie`)
+4. Click **Connect**.
+
+Once connected, the cells below run inside the running Phoenix node.
+
+## Smoke test
+
+```elixir
+# Confirm we're attached to the live node and can reach the database.
+FinancialTracking.Repo.query!("select 1")
+```
+
+```elixir
+# The running node's name — should be financial_tracking@web.local.
+node()
+```

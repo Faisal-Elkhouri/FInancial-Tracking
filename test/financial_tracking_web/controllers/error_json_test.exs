@@ -2,7 +2,9 @@ defmodule FinancialTrackingWeb.ErrorJSONTest do
   use FinancialTrackingWeb.ConnCase, async: true
 
   test "renders 404" do
-    assert FinancialTrackingWeb.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}
+    assert FinancialTrackingWeb.ErrorJSON.render("404.json", %{}) == %{
+             errors: %{detail: "Not Found"}
+           }
   end
 
   test "renders 500" do

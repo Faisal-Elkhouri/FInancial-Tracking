@@ -10,7 +10,8 @@ defmodule FinancialTracking.Application do
     children = [
       FinancialTrackingWeb.Telemetry,
       FinancialTracking.Repo,
-      {DNSCluster, query: Application.get_env(:financial_tracking, :dns_cluster_query) || :ignore},
+      {DNSCluster,
+       query: Application.get_env(:financial_tracking, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: FinancialTracking.PubSub},
       # Start a worker by calling: FinancialTracking.Worker.start_link(arg)
       # {FinancialTracking.Worker, arg},

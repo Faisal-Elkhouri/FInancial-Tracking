@@ -28,18 +28,30 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    # Fixed hostname so the BEAM node registers in EPMD under a name other
+    # containers (Livebook) can resolve via Docker DNS. Erlang long-name
+    # distribution requires a fully qualified hostname (one with a dot),
+    # hence `web.local` and the matching network alias below.
+    hostname: web.local
+    networks:
+      default:
+        aliases:
+          - web.local
     # Make sure deps are current, set up the DB, then start the server.
+    # Start under a named distributed node sharing LIVEBOOK_COOKIE so Livebook
+    # can attach to the live app. Code reloading and asset watchers are unaffected.
     command: >
       sh -c "mix deps.get &&
              mix ecto.create &&
              mix ecto.migrate &&
-             mix phx.server"
+             elixir --name financial_tracking@web.local --cookie $$LIVEBOOK_COOKIE -S mix phx.server"
     environment:
       MIX_ENV: dev
       DATABASE_HOST: db
       DATABASE_USER: ${DATABASE_USER:-postgres}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       DATABASE_NAME: ${DATABASE_NAME:-financial_tracking_dev}
+      LIVEBOOK_COOKIE: ${LIVEBOOK_COOKIE:-financial_tracking_cookie}
       PORT: 4000
     ports:
       - "4000:4000"
@@ -53,6 +65,28 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # Livebook attached to the running Phoenix node. In the UI choose
+  # Runtime settings -> Attached node, with name `financial_tracking@web.local`
+  # and the shared LIVEBOOK_COOKIE, to run notebooks on the live app.
+  livebook:
+    image: ghcr.io/livebook-dev/livebook:latest
+    environment:
+      # Long-name distribution (the only mode recent Livebook supports) so it
+      # can attach to financial_tracking@web.local.
+      LIVEBOOK_DISTRIBUTION: name
+      LIVEBOOK_COOKIE: ${LIVEBOOK_COOKIE:-financial_tracking_cookie}
+      # Local dev convenience: no auth token. Swap for LIVEBOOK_PASSWORD if you prefer.
+      LIVEBOOK_TOKEN_ENABLED: "false"
+      # Persist notebooks/settings under the mounted folder.
+      LIVEBOOK_HOME: /data
+    ports:
+      - "8080:8080"   # Livebook UI
+      - "8081:8081"   # Livebook's own iframe/runtime port
+    volumes:
+      - ./notebooks:/data
+    depends_on:
+      - web
 
 volumes:
   pgdata_dev:
