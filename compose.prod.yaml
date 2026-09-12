@@ -1,0 +1,192 @@
+# Production stack: Postgres + the Phoenix app built as a slim OTP release.
+#
+# The deployment target for this project is not yet chosen, so treat this file
+# as a FAITHFUL LOCAL REHEARSAL of production rather than a deploy artifact:
+# it exercises the real release image, real migrations, and real shutdown
+# behaviour, without pretending to be a hardened public deployment (there is no
+# TLS front door here - see docs/INFRASTRUCTURE_BACKLOG.md).
+#
+#   cp .env.example .env
+#   ./scripts/gen-secrets.sh                 # writes ./secrets/* (gitignored)
+#   docker compose -f compose.prod.yaml up --build -d
+#
+# Then visit http://localhost:4000.
+#
+# Separate project name from the dev stack. Without this, both files derived
+# the same project name from the directory, so bringing prod up while dev was
+# running would collide on container, network and volume names.
+name: financial-tracking-prod
+
+# Docker's default json-file driver has NO size limit, so container logs grow
+# until the disk fills - at which point Postgres can no longer write WAL. That
+# makes log rotation a data-durability concern, not housekeeping. The `local`
+# driver rotates by default; the explicit values document the intent.
+x-logging: &default-logging
+  driver: "local"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# Shared by `web` and the one-shot `migrate` service, so the two can never
+# drift apart and migrate against a different database than the app uses.
+x-app-env: &app-env
+  DATABASE_HOST: db
+  DATABASE_PORT: "5432"
+  DATABASE_USER: ${DATABASE_USER:-postgres}
+  DATABASE_NAME: ${DATABASE_NAME:-financial_tracking_prod}
+  # Read from a mounted file rather than a plain env var: plain values show up
+  # in `docker inspect`, in /proc/<pid>/environ, and in `docker compose config`.
+  DATABASE_PASSWORD_FILE: /run/secrets/db_password
+  SECRET_KEY_BASE_FILE: /run/secrets/secret_key_base
+  PHX_HOST: ${PHX_HOST:?set PHX_HOST to the hostname browsers will use}
+  # This rehearsal serves plain HTTP on :4000. Behind a real TLS proxy, drop
+  # these two so they fall back to https/443.
+  PHX_SCHEME: ${PHX_SCHEME:-http}
+  PHX_URL_PORT: ${PHX_URL_PORT:-4000}
+  PORT: "4000"
+  PHX_SERVER: "true"
+
+services:
+  db:
+    image: postgres:17.11
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      # The official image supports the _FILE convention for its own entrypoint
+      # variables. NOTE this is an entrypoint feature, not a libpq one - client
+      # tools such as pg_dump do NOT read *_FILE (see the backup service).
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: ${DATABASE_NAME:-financial_tracking_prod}
+    secrets:
+      - db_password
+    volumes:
+      # Correct for Postgres 17 and below. Postgres 18+ moved PGDATA to a
+      # version-specific path and the declared VOLUME to /var/lib/postgresql;
+      # a tag-only major bump silently starts an empty database. Major upgrades
+      # are dump -> verify -> restore, never a tag edit.
+      - pgdata_prod:/var/lib/postgresql/data
+    shm_size: 256mb
+    networks:
+      - backend
+    healthcheck:
+      # -h 127.0.0.1 forces TCP, so this cannot pass against the temporary
+      # Unix-socket-only server the entrypoint runs during first-boot initdb.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # A slow shutdown checkpoint on a large database can exceed the 10s default
+    # and get SIGKILLed, forcing crash recovery on the next boot.
+    stop_grace_period: 60s
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        # NOTE: `deploy.resources.limits` IS honoured by plain `docker compose
+        # up` - the widely repeated "deploy is Swarm-only" advice is stale. Only
+        # replicas/placement/update_config remain Swarm-only.
+        # Size these to the real host before deploying anywhere.
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+
+  # One-shot migration runner. Split out of the web command on purpose:
+  #
+  #   * `restart: "no"` is mandatory. A service that exits 0 under
+  #     `unless-stopped` restarts forever.
+  #   * Running migrations inside the web command meant a failing migration
+  #     exited non-zero, Docker restarted the container, and the migration was
+  #     retried indefinitely - a crash loop whose cause is buried N restarts
+  #     deep in the logs.
+  #   * It also let us drop the `command: sh -c "..."` override on web, which
+  #     is what was destroying graceful shutdown (see the web service).
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: financial-tracking:${IMAGE_TAG:-local}
+    command: ["/app/bin/migrate"]
+    restart: "no"
+    environment: *app-env
+    secrets:
+      - db_password
+      - secret_key_base
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *default-logging
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Same tag as `migrate`, so both always run identical code. Swap this for a
+    # registry reference (pinned by digest) once images are built in CI:
+    #   image: ghcr.io/faisal-elkhouri/financial-tracking@${IMAGE_DIGEST:?}
+    image: financial-tracking:${IMAGE_TAG:-local}
+    #
+    # Deliberately NO `command:` override. The Dockerfile's exec-form
+    # CMD ["/app/bin/server"] puts beam.smp at PID 1, where OTP's SIGTERM
+    # handler drains cleanly. The previous `sh -c "migrate && server"` left dash
+    # at PID 1, and dash never execs from `sh -c` - so the kernel silently
+    # DISCARDED SIGTERM (signals with a default disposition sent to a PID-1
+    # process are dropped), and every `docker stop` ended in SIGKILL mid-request.
+    environment: *app-env
+    secrets:
+      - db_password
+      - secret_key_base
+    ports:
+      - "${PHX_BIND_IP:-127.0.0.1}:4000:4000"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Phoenix drains LiveView sockets (30s default) before the HTTP layer
+    # (Bandit/Thousand Island, 15s default), so the 10s default would SIGKILL
+    # the BEAM mid-drain.
+    stop_grace_period: 60s
+    restart: unless-stopped
+    logging: *default-logging
+    # The release writes nothing outside /tmp (RELEASE_TMP and ERL_CRASH_DUMP
+    # both point there), so the root filesystem can be read-only. Verified.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+
+networks:
+  frontend:
+  backend:
+    # No route off the host. A compromised web container cannot reach the
+    # internet from the database side of the stack.
+    # NOTE: anything that needs egress (e.g. a backup sidecar shipping dumps
+    # off-host) must also join `frontend`, or get its own egress network.
+    internal: true
+
+secrets:
+  # File-backed secrets are bind-mounted read-only at /run/secrets/<name>.
+  # They are NOT encrypted at rest - the win is that the values stop appearing
+  # in `docker inspect`, in the process environment, and in `compose config`.
+  db_password:
+    file: ./secrets/db_password
+  secret_key_base:
+    file: ./secrets/secret_key_base
+
+volumes:
+  pgdata_prod:

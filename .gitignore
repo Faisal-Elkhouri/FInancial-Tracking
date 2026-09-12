@@ -39,3 +39,6 @@ npm-debug.log
 .env
 
 knowledge base/office-migrations.md
+
+# Local secret material for the prod rehearsal (see compose.prod.yaml).
+/secrets/

@@ -48,5 +48,21 @@ erl_crash.dump
 # Local env and compose files don't belong in the release image.
 .env
 .env.example
+compose*.yaml
+compose*.yml
 docker-compose*.yml
+
+# Secrets must never enter the build context.
+secrets/
+
+# Docs and local tooling: not copied into the image, just context bloat.
+docs/
+notebooks/
+knowledge base/
+.claude/
+.github/
+README.md
+SETUP.md
+AGENTS.md
+.gitattributes
 Dockerfile.dev

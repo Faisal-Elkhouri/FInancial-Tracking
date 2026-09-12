@@ -1,7 +1,7 @@
 # Testing Playground
 
 Interactive TDD bench. Attach this notebook to the running app
-(**Runtime settings → Attached node**, name `financial_tracking@web.local`,
+(**Runtime settings → Attached node**, name `financial_tracking@web.internal`,
 cookie = `LIVEBOOK_COOKIE`), sketch assertions here against the real
 modules, then graduate them into `test/` where they run sandboxed and
 gate commits.

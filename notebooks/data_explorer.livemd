@@ -4,7 +4,7 @@
 
 Changeset and query exploration for the Tracker domain. Attach to the
 running app first (**Runtime settings → Attached node**,
-`financial_tracking@web.local` + `LIVEBOOK_COOKIE`). Read-only unless you opt
+`financial_tracking@web.internal` + `LIVEBOOK_COOKIE`). Read-only unless you opt
 in — every cell here either builds changesets in memory or queries.
 
 ## Setup

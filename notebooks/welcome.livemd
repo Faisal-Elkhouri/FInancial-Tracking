@@ -8,7 +8,7 @@ This Livebook runs in Docker alongside the Phoenix dev server. To run code on th
 1. Click **Runtime settings** (top-right, the runtime indicator).
 2. Choose **Attached node**.
 3. Fill in:
-   - **Name:** `financial_tracking@web.local`
+   - **Name:** `financial_tracking@web.internal`
    - **Cookie:** the value of `LIVEBOOK_COOKIE` (default `financial_tracking_cookie`)
 4. Click **Connect**.
 
@@ -22,6 +22,6 @@ FinancialTracking.Repo.query!("select 1")
 ```
 
 ```elixir
-# The running node's name — should be financial_tracking@web.local.
+# The running node's name — should be financial_tracking@web.internal.
 node()
 ```

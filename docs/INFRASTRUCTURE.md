@@ -67,7 +67,7 @@ container never races a half-started database.
 **`web`** — built from `Dockerfile.dev`. Its startup command chains:
 
 ```
-mix deps.get && mix ecto.create && mix ecto.migrate && elixir --name financial_tracking@web.local --cookie $LIVEBOOK_COOKIE -S mix phx.server
+mix deps.get && mix ecto.create && mix ecto.migrate && elixir --name financial_tracking@web.internal --cookie $LIVEBOOK_COOKIE -S mix phx.server
 ```
 
 - `deps.get` re-syncs dependencies in case `mix.lock` changed since the image
@@ -76,10 +76,10 @@ mix deps.get && mix ecto.create && mix ecto.migrate && elixir --name financial_t
   clone plus `docker compose up` yields a created, migrated database with no
   manual steps.
 - The server starts as a **named distributed node**
-  (`financial_tracking@web.local`) sharing an Erlang cookie, which is what
+  (`financial_tracking@web.internal`) sharing an Erlang cookie, which is what
   lets Livebook attach to the running app. Erlang long-name distribution
   requires a fully qualified hostname (one containing a dot), so the
-  container gets `hostname: web.local` plus a matching Docker network alias
+  container gets `hostname: web.internal` plus a matching Docker network alias
   that other containers resolve via Docker DNS.
 
 Its volume layout is the key trick of the dev setup:
@@ -97,7 +97,7 @@ Without this, host and container would fight over incompatible build
 artifacts.
 
 **`livebook`** — the official Livebook image, configured for long-name
-distribution with the same cookie so it can attach to `financial_tracking@web.local`
+distribution with the same cookie so it can attach to `financial_tracking@web.internal`
 (see [§7](#7-livebook)). Notebooks persist to `./notebooks` on the host.
 
 **`test`** — a one-shot test runner behind a Compose *profile*
@@ -326,11 +326,11 @@ should run.
 Livebook runs as its own dev-stack container (UI at
 <http://localhost:8080>) and connects to the running Phoenix app through
 Erlang **distribution**: the web container starts as node
-`financial_tracking@web.local`, both containers share `LIVEBOOK_COOKIE`, and
-Docker DNS (via the `web.local` network alias) lets Livebook find it.
+`financial_tracking@web.internal`, both containers share `LIVEBOOK_COOKIE`, and
+Docker DNS (via the `web.internal` network alias) lets Livebook find it.
 
 To attach a notebook to the live app: *Runtime settings → Attached node* →
-name `financial_tracking@web.local`, cookie = your `LIVEBOOK_COOKIE`. Cells then
+name `financial_tracking@web.internal`, cookie = your `LIVEBOOK_COOKIE`. Cells then
 execute **inside the running application** — full access to `Repo`, contexts,
 and application state.
 
@@ -357,7 +357,7 @@ code.
 docker compose up                         # start everything (app :4000, Livebook :8080)
 docker compose up --build                 # after changing mix.exs/Dockerfile.dev
 docker compose logs -f web               # follow app logs
-docker compose exec web sh -c 'iex --name console@web.local --cookie "$LIVEBOOK_COOKIE" --remsh financial_tracking@web.local'  # IEx into the running app
+docker compose exec web sh -c 'iex --name console@web.internal --cookie "$LIVEBOOK_COOKIE" --remsh financial_tracking@web.internal'  # IEx into the running app
 docker compose exec web mix ecto.reset   # rebuild dev DB from scratch
 docker compose down                       # stop (data survives)
 

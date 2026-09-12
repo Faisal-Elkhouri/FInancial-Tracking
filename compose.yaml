@@ -1,0 +1,185 @@
+# Development stack: Postgres + the Phoenix app running in dev mode with code
+# reloading. This is the default compose file, so `docker compose up` just works.
+#
+#   cp .env.example .env   # tweak if you like, the defaults are fine for dev
+#   docker compose up
+#
+# Then visit http://localhost:4000. Livebook is at http://localhost:8080.
+#
+# Tests also run in Docker (the app never runs on the host):
+#
+#   docker compose run --rm test                               # whole suite
+#   docker compose run --rm test mix test test/some_test.exs   # one file
+#   docker compose run --rm test mix precommit                 # the local gate
+#
+# The test service uses its own database (financial_tracking_test), created and
+# migrated automatically by the `mix test` alias.
+
+# Explicit project name. Without this, Compose derives it from the directory
+# name ("FInancial Tracking" - space and typo included) and sanitises it, which
+# makes container/volume/network prefixes unpredictable.
+name: financial-tracking
+
+# One build definition and one image tag shared by `web` and `test`, instead of
+# two identical build blocks producing two tags for the same image.
+# NOTE: YAML merge keys only merge mappings. Sequences (volumes, ports) are
+# replaced wholesale, never appended - so the full list must live here.
+x-elixir-dev: &elixir-dev
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  image: financial-tracking-dev:latest
+  volumes:
+    # Live source for code reloading...
+    - .:/app
+    # ...but keep deps and build artifacts in the container so the Linux
+    # binaries don't clash with whatever is on the (possibly Windows) host.
+    - deps:/app/deps
+    - build:/app/_build
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    # Pinned to a patch release: the bare `17` tag moves under you, and nothing
+    # records which binary wrote the data files.
+    #
+    # DO NOT bump this major by changing the tag alone. Postgres 18+ moved
+    # PGDATA to a version-specific path (/var/lib/postgresql/18/docker) and the
+    # declared VOLUME to /var/lib/postgresql. A tag-only bump silently
+    # initialises an empty database inside the image layer, appears to have lost
+    # all your data, and does not error. A major upgrade is dump -> verify ->
+    # restore, never a tag edit.
+    image: postgres:17.11
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATABASE_NAME:-financial_tracking_dev}
+    ports:
+      # Bound to loopback: still reachable from psql/DBeaver on this machine,
+      # but not from the rest of the network. The previous "5432:5432" exposed a
+      # database with password `postgres` to every device on the LAN.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Correct for Postgres 17 and below. See the image note above before
+      # changing either this path or the tag.
+      - pgdata_dev:/var/lib/postgresql/data
+    # Postgres uses /dev/shm for parallel query workers and large sorts/hashes.
+    # Docker's 64MB default produces "could not resize shared memory segment"
+    # on exactly the kind of aggregate query a financial app runs.
+    shm_size: 256mb
+    healthcheck:
+      # -h 127.0.0.1 forces TCP. This matters: on an empty data directory the
+      # entrypoint runs a temporary server that listens on the Unix socket ONLY
+      # (listen_addresses is empty), so a plain `pg_isready` reports healthy
+      # before any TCP listener exists. `web` then starts and `mix ecto.create`
+      # fails with connection-refused - intermittently, only on fresh clones.
+      # -d names the database, so this checks "connectable", not "process alive".
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      # Failures during the start period do not count against `retries`, so a
+      # slow first-boot initdb does not burn the retry budget.
+      start_period: 30s
+    # Give Postgres time for a clean shutdown checkpoint. The 10s default can
+    # SIGKILL it mid-checkpoint, forcing crash recovery on the next boot.
+    stop_grace_period: 60s
+
+  web:
+    <<: *elixir-dev
+    # Fixed hostname so the BEAM node registers in EPMD under a name other
+    # containers (Livebook) can resolve via Docker DNS. Erlang long-name
+    # distribution requires a fully qualified hostname (one with a dot).
+    #
+    # `.internal` rather than `.local`: RFC 6762 reserves `.local` for
+    # multicast DNS and requires resolvers to intercept it rather than forward
+    # it. It worked here only because this image ships no mDNS resolver - i.e.
+    # by accident. ICANN reserved `.internal` in 2024 for exactly this purpose.
+    hostname: web.internal
+    networks:
+      default:
+        aliases:
+          - web.internal
+    # `exec` on the final command is load-bearing, not style. Without it, dash
+    # stays PID 1 - and dash never execs from `sh -c`, not even for a single
+    # command. The kernel silently DISCARDS signals with a default disposition
+    # sent to a PID-1 process, so `docker compose down` would be ignored
+    # entirely, hang for the full grace period, and then SIGKILL the BEAM.
+    # With `exec`, beam.smp is PID 1 and OTP's SIGTERM handler drains cleanly.
+    command: >
+      sh -c "mix deps.get &&
+             mix ecto.create &&
+             mix ecto.migrate &&
+             exec elixir --name financial_tracking@web.internal --cookie $$LIVEBOOK_COOKIE -S mix phx.server"
+    environment:
+      MIX_ENV: dev
+      DATABASE_HOST: db
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      DATABASE_NAME: ${DATABASE_NAME:-financial_tracking_dev}
+      LIVEBOOK_COOKIE: ${LIVEBOOK_COOKIE:-financial_tracking_cookie}
+      PORT: 4000
+    ports:
+      - "127.0.0.1:4000:4000"
+    # Phoenix drains LiveView sockets (30s default) before the HTTP layer
+    # (Bandit/Thousand Island, 15s default). 10s is not enough to finish.
+    stop_grace_period: 60s
+
+  # One-shot test runner: `docker compose run --rm test`. Lives behind a
+  # profile so `docker compose up` does not start it; `run` activates the
+  # profile automatically. Shares the deps/_build volumes with web (safe:
+  # MIX_ENV=test compiles into _build/test, separate from web's _build/dev).
+  test:
+    <<: *elixir-dev
+    profiles: ["test"]
+    # Deliberately NOT `mix deps.get && mix test`. Elixir 1.18+ locks
+    # compilation, but that lock does not cover dependency *fetching*, and this
+    # service shares the `deps` volume with web. After changing mix.lock, run
+    # `docker compose up web` (or `docker compose run --rm test mix deps.get`)
+    # once before running the suite.
+    command: mix test
+    environment:
+      MIX_ENV: test
+      DATABASE_HOST: db
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      # Deliberately its own variable - config/test.exs ignores DATABASE_NAME
+      # so tests can never point at the dev database.
+      TEST_DATABASE_NAME: ${TEST_DATABASE_NAME:-financial_tracking_test}
+
+  # Livebook attached to the running Phoenix node. In the UI choose
+  # Runtime settings -> Attached node, with name financial_tracking@web.internal
+  # and the shared LIVEBOOK_COOKIE, to run notebooks on the live app.
+  livebook:
+    # Pinned, not `:latest`. A checked-in compose file that floats means a
+    # teammate's `docker compose up` silently gets a different Livebook.
+    image: ghcr.io/livebook-dev/livebook:0.19.9
+    environment:
+      # Long-name distribution so it can attach to financial_tracking@web.internal.
+      LIVEBOOK_DISTRIBUTION: name
+      LIVEBOOK_COOKIE: ${LIVEBOOK_COOKIE:-financial_tracking_cookie}
+      # Livebook executes arbitrary Elixir *inside the attached app node*, with
+      # Repo and every context in scope. Auth is therefore not optional even in
+      # dev. Minimum length is 12 characters.
+      LIVEBOOK_PASSWORD: ${LIVEBOOK_PASSWORD:-financial-tracking-dev-change-me}
+      # Persist notebooks/settings under the mounted folder.
+      LIVEBOOK_HOME: /data
+      LIVEBOOK_IFRAME_PORT: 8081
+    ports:
+      # Loopback only. Livebook's own docs assume it "only binds to 127.0.0.1,
+      # allowing access to happen only within the current machine" - publishing
+      # on all interfaces overrode exactly that assumption and turned this into
+      # remote code execution against the dev database for anyone on the LAN.
+      - "127.0.0.1:8080:8080"   # Livebook UI
+      - "127.0.0.1:8081:8081"   # Livebook's own iframe/runtime port
+    volumes:
+      - ./notebooks:/data
+    depends_on:
+      - web
+
+volumes:
+  pgdata_dev:
+  deps:
+  build:
