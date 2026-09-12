@@ -2,14 +2,22 @@ import Config
 
 # Configure your database
 #
+# Docker-first: defaults point at the compose "db" service, since the app only
+# runs in containers (see the `test` service in docker-compose.yml). Note we
+# deliberately do NOT read DATABASE_NAME here — the web container sets that to
+# the dev database, and tests must never point at it. Tests get their own
+# TEST_DATABASE_NAME variable instead.
+#
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
 config :financial_tracking, FinancialTracking.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "financial_tracking_test#{System.get_env("MIX_TEST_PARTITION")}",
+  username: System.get_env("DATABASE_USER", "postgres"),
+  password: System.get_env("DATABASE_PASSWORD", "postgres"),
+  hostname: System.get_env("DATABASE_HOST", "db"),
+  database:
+    System.get_env("TEST_DATABASE_NAME", "financial_tracking_test") <>
+      System.get_env("MIX_TEST_PARTITION", ""),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 

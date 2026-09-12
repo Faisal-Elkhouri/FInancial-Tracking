@@ -1,0 +1,83 @@
+# Testing Playground
+
+Interactive TDD bench. Attach this notebook to the running app
+(**Runtime settings → Attached node**, name `financial_tracking@web.local`,
+cookie = `LIVEBOOK_COOKIE`), sketch assertions here against the real
+modules, then graduate them into `test/` where they run sandboxed and
+gate commits.
+
+> **Warning — no sandbox here.** The attached node is the **dev**
+> environment talking to the **dev database**. Anything you insert or
+> delete is real. DB-touching experiments below run inside a transaction
+> that is deliberately rolled back; keep that habit. If dev data gets
+> messy: `docker compose exec web mix ecto.reset`.
+
+## Setup
+
+```elixir
+alias FinancialTracking.Repo
+alias FinancialTracking.Tracker
+alias FinancialTracking.Tracker.{ExecutiveBudget, Office, Purchase}
+
+# Start ExUnit inside the notebook. auto_run: false lets us call
+# ExUnit.run/0 explicitly, as many times as we like.
+ExUnit.start(auto_run: false)
+```
+
+## Write tests in cells
+
+Define (or redefine — just re-run the cell) a test module, then execute it
+with `ExUnit.run()` in the next cell. This is the whole loop: tweak,
+re-run, repeat.
+
+```elixir
+defmodule PlaygroundTest do
+  use ExUnit.Case, async: false
+
+  test "office changeset requires a name" do
+    changeset = Office.changeset(%Office{}, %{})
+    refute changeset.valid?
+    assert {"can't be blank", _} = changeset.errors[:name]
+  end
+
+  test "purchase amount casts from string" do
+    changeset = Purchase.changeset(%Purchase{}, %{name: "Pens", amount: "9.99"})
+    assert changeset.changes.amount == Decimal.new("9.99")
+  end
+end
+
+ExUnit.run()
+```
+
+## Database experiments (rollback pattern)
+
+Wrap anything that writes in a transaction and roll it back at the end —
+you get real constraint behavior (unique names, foreign keys) with zero
+residue in the dev database.
+
+```elixir
+Repo.transaction(fn ->
+  {:ok, parent} = Tracker.create_office(%{name: "Playground-#{System.unique_integer()}"})
+
+  {:ok, child} =
+    Tracker.create_office(%{
+      name: "Playground-child-#{System.unique_integer()}",
+      parent_id: parent.id
+    })
+
+  result = Tracker.get_office_with_children(parent.id)
+
+  # Nothing above survives this line.
+  Repo.rollback({:experiment_done, result, child.id})
+end)
+```
+
+## Graduating a test
+
+When a cell-test earns its keep:
+
+1. Copy the `test "..."` block into the matching file under
+   `test/financial_tracking/`.
+2. Swap manual inserts for `FinancialTracking.TrackerFixtures` helpers —
+   the real suite runs in the SQL Sandbox, so no rollback gymnastics needed.
+3. Confirm it passes for real: `docker compose run --rm test`.

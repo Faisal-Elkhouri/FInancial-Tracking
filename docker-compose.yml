@@ -5,6 +5,14 @@
 #   docker compose up
 #
 # Then visit http://localhost:4000.
+#
+# Tests also run in Docker (the app never runs on the host):
+#
+#   docker compose run --rm test                          # whole suite
+#   docker compose run --rm test mix test test/some_test.exs  # one file
+#
+# The test service uses its own database (financial_tracking_test), created and
+# migrated automatically by the `mix test` alias.
 
 services:
   db:
@@ -60,6 +68,32 @@ services:
       - .:/app
       # ...but keep deps and build artifacts in the container so the Linux
       # binaries don't clash with whatever is on the (possibly Windows) host.
+      - deps:/app/deps
+      - build:/app/_build
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # One-shot test runner: `docker compose run --rm test`. Lives behind a
+  # profile so `docker compose up` doesn't start it. Shares the deps/_build
+  # volumes with web (safe: MIX_ENV=test compiles into _build/test, separate
+  # from web's _build/dev).
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles: ["test"]
+    command: sh -c "mix deps.get && mix test"
+    environment:
+      MIX_ENV: test
+      DATABASE_HOST: db
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      # Deliberately its own variable — config/test.exs ignores DATABASE_NAME
+      # so tests can never point at the dev database.
+      TEST_DATABASE_NAME: ${TEST_DATABASE_NAME:-financial_tracking_test}
+    volumes:
+      - .:/app
       - deps:/app/deps
       - build:/app/_build
     depends_on:

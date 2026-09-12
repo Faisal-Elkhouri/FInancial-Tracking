@@ -1,12 +1,13 @@
 import Config
 
 # Configure your database
-# These default to local Postgres but can be overridden with env vars, which is
-# what the Docker Compose setup does (it points DATABASE_HOST at the "db" service).
+# Docker-first: the app only runs inside Docker Compose, so defaults point at
+# the "db" service. Everything can still be overridden with env vars (which is
+# also how the compose file wires things up explicitly).
 config :financial_tracking, FinancialTracking.Repo,
   username: System.get_env("DATABASE_USER") || "postgres",
   password: System.get_env("DATABASE_PASSWORD") || "postgres",
-  hostname: System.get_env("DATABASE_HOST") || "localhost",
+  hostname: System.get_env("DATABASE_HOST") || "db",
   database: System.get_env("DATABASE_NAME") || "financial_tracking_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,

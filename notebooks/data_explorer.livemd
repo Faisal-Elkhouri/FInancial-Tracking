@@ -1,0 +1,75 @@
+# Data Explorer
+
+## Section
+
+Changeset and query exploration for the Tracker domain. Attach to the
+running app first (**Runtime settings → Attached node**,
+`financial_tracking@web.local` + `LIVEBOOK_COOKIE`). Read-only unless you opt
+in — every cell here either builds changesets in memory or queries.
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+alias FinancialTracking.Repo
+alias FinancialTracking.Tracker
+alias FinancialTracking.Tracker.{ExecutiveBudget, Office, Purchase}
+
+# Same helper DataCase gives tests: changeset errors as a readable map.
+errors_on = fn changeset ->
+  Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
+    Regex.replace(~r"%{(\w+)}", message, fn _, key ->
+      opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+    end)
+  end)
+end
+```
+
+## Probe a changeset
+
+Feed candidate attrs and inspect what validates, what casts, and what
+gets ignored. Useful for designing a validation before writing its test.
+
+```elixir
+attrs = %{name: "Team lunch", amount: "125.75", is_tax: false}
+
+changeset = Tracker.change_purchase(%Purchase{}, attrs)
+{changeset.valid?, changeset.changes, errors_on.(changeset)}
+```
+
+```elixir
+# Empty attrs → see every required-field error at once.
+errors_on.(Tracker.change_budget_line_item(%ExecutiveBudget{}, %{}))
+```
+
+```elixir
+# What survives the cast? Keys absent from `changes` were not cast —
+# e.g. Purchase currently ignores :notes, :concur_expense_report, :event.
+Purchase.changeset(%Purchase{}, %{name: "x", notes: "dropped?", event: 3}).changes
+```
+
+## Browse live data
+
+```elixir
+Repo.all(from o in Office, order_by: o.name, preload: [:children, :parent])
+```
+
+```elixir
+Repo.all(
+  from p in Purchase,
+    order_by: [desc: p.purchased_at],
+    limit: 20,
+    preload: [:origin_office]
+)
+```
+
+```elixir
+# Allocated budget rolled up per office.
+Repo.all(
+  from eb in ExecutiveBudget,
+    join: o in assoc(eb, :office),
+    group_by: o.name,
+    select: {o.name, sum(eb.allocated)}
+)
+```
