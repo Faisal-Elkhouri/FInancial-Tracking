@@ -1,9 +1,9 @@
 # Development image. Unlike the production Dockerfile (which builds a slim
 # release), this keeps the full Elixir toolchain around so we get compilation,
 # code reloading, and the asset watchers while we work.
-ARG ELIXIR_VERSION=1.19.5
-ARG OTP_VERSION=28.3.1
-ARG DEBIAN_VERSION=trixie-20260610-slim
+ARG ELIXIR_VERSION=1.19.6
+ARG OTP_VERSION=28.5.0.6
+ARG DEBIAN_VERSION=trixie-20260824-slim
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 
 FROM ${BUILDER_IMAGE}

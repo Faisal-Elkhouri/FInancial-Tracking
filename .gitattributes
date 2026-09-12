@@ -1,0 +1,32 @@
+# Line-ending policy.
+#
+# This repo is developed on Windows (core.autocrlf=true) but every script in it
+# is executed inside a Linux container. Without this file, a fresh clone or a
+# `git checkout -- rel/` rewrites the release scripts with CRLF, giving them a
+# `#!/bin/sh\r` shebang. Inside the container that fails as
+# "no such file or directory", which points at the wrong problem entirely.
+#
+# Default: LF in the repository *and* in the working tree.
+* text=auto eol=lf
+
+# Windows-only helpers genuinely need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Executed inside Linux containers - LF is load-bearing, not cosmetic.
+*.sh                     text eol=lf
+rel/overlays/bin/server  text eol=lf
+rel/overlays/bin/migrate text eol=lf
+Dockerfile*              text eol=lf
+*.yml                    text eol=lf
+*.yaml                   text eol=lf
+
+# Binary: never transform.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.ez   binary
