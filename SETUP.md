@@ -40,9 +40,9 @@ tooling only** — nothing hand-rolled.
    `rel/overlays/bin/{migrate,server}` release scripts.
 
 3. **Docker Compose stacks added** so Postgres and the app run together:
-   - `docker-compose.yml` — dev: Postgres 17 + app via `Dockerfile.dev`, with
+   - `compose.yaml` — dev: Postgres 17 + app via `Dockerfile.dev`, with
      code reloading and named volumes for `deps`/`_build`.
-   - `docker-compose.prod.yml` — prod: Postgres 17 + the release image, running
+   - `compose.prod.yaml` — prod: Postgres 17 + the release image, running
      `bin/migrate` then `bin/server` on boot.
    - `Dockerfile.dev` — dev image keeping the full Elixir toolchain plus
      `inotify-tools` for live reload.

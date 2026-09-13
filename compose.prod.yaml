@@ -170,6 +170,42 @@ services:
         reservations:
           memory: 256m
 
+  # Database backups. Behind a profile, so it never starts with `up`:
+  #
+  #   docker compose -f compose.prod.yaml run --rm backup
+  #
+  # Schedule it from the host (cron / systemd timer / Task Scheduler) rather
+  # than running a scheduler inside the stack - one less always-on process, and
+  # the host's scheduler already has logging and failure mail.
+  #
+  # Uses the same Postgres major version as `db`, because pg_dump must not be
+  # older than the server it dumps.
+  backup:
+    image: postgres:17.11
+    profiles: ["backup"]
+    restart: "no"
+    environment:
+      PGHOST: db
+      PGUSER: ${DATABASE_USER:-postgres}
+      PGDATABASE: ${DATABASE_NAME:-financial_tracking_prod}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    secrets:
+      - db_password
+    volumes:
+      - ./backups:/backups
+      - ./scripts/pg-backup.sh:/usr/local/bin/pg-backup:ro
+      - ./scripts/pg-restore.sh:/usr/local/bin/pg-restore:ro
+    # backend only: this writes dumps to a local volume and needs no egress.
+    # Shipping dumps off-host (restic/rclone to object storage) would ALSO
+    # require the frontend network, since `backend` is internal: true.
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/usr/local/bin/pg-backup"]
+    logging: *default-logging
+
 networks:
   frontend:
   backend:

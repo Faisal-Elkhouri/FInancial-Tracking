@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the previous run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test and audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Deliberately the SAME command a developer runs locally
+      # (`docker compose run --rm test mix ci`), in the same image, against the
+      # same Postgres. docs/INFRASTRUCTURE.md calls for "no separate CI logic to
+      # drift" - running the suite natively here would reintroduce exactly that.
+      #
+      # `mix ci` asserts rather than mutates: compile --warnings-as-errors,
+      # format --check-formatted, deps.unlock --check-unused, deps.audit,
+      # hex.audit, sobelow, test.
+      - name: mix ci
+        run: docker compose run --rm --build test mix ci
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+  image:
+    name: Production image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      # BuildKit's built-in Dockerfile linter. Covers most of what hadolint
+      # would, with no extra tool to install.
+      - name: Lint Dockerfiles
+        run: |
+          docker build --check .
+          docker build --check -f Dockerfile.dev .
+
+      - name: Build release image
+        run: |
+          docker build -t financial-tracking:ci \
+            --build-arg VCS_REF="$GITHUB_SHA" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg VERSION="${GITHUB_REF_NAME}-${GITHUB_SHA:0:7}" \
+            .
+
+      # This is the step that would have caught the bug this pipeline was born
+      # from: rel/overlays/bin/server was mode 0644 in the git index, which is
+      # invisible on Windows (core.filemode=false) but makes /app/bin/server
+      # non-executable on every Linux checkout - so the container died with
+      # "permission denied" (exit 126) before running a single line of Elixir.
+      #
+      # Booting with no reachable database is expected to FAIL - but it must
+      # fail on the database connection, proving the release actually executed,
+      # read config/runtime.exs, and survived a read-only root filesystem.
+      - name: Smoke-test that the release boots
+        run: |
+          set -o pipefail
+          out=$(docker run --rm \
+            --read-only --tmpfs /tmp:rw,nosuid,size=64m \
+            -e SECRET_KEY_BASE="$(head -c 64 /dev/urandom | base64 | tr -d '\n=+/')" \
+            -e DATABASE_URL="ecto://postgres:postgres@127.0.0.1:5999/nope" \
+            -e PHX_HOST=localhost \
+            financial-tracking:ci /app/bin/migrate 2>&1 || true)
+
+          echo "$out" | tail -20
+
+          case "$out" in
+            *"permission denied"*|*"exec format error"*|*"no such file or directory"*)
+              echo "::error::Release entrypoint is not executable or has wrong line endings."
+              exit 1 ;;
+          esac
+
+          if ! echo "$out" | grep -q "connection refused"; then
+            echo "::error::Release did not reach the database connection stage."
+            exit 1
+          fi
+          echo "OK: release booted read-only and failed only on the DB connection."

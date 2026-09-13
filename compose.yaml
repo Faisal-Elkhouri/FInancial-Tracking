@@ -60,7 +60,14 @@ services:
       # Bound to loopback: still reachable from psql/DBeaver on this machine,
       # but not from the rest of the network. The previous "5432:5432" exposed a
       # database with password `postgres` to every device on the LAN.
-      - "127.0.0.1:5432:5432"
+      #
+      # Host port defaults to 15432, NOT 5432, because a native PostgreSQL
+      # install commonly already owns 5432 - in which case Docker fails with
+      # "ports are not available ... forbidden by its access permissions", and,
+      # worse, any mix command run on the host silently talks to that native
+      # server instead of this container. Set DB_HOST_PORT=5432 if you have no
+      # local PostgreSQL.
+      - "127.0.0.1:${DB_HOST_PORT:-15432}:5432"
     volumes:
       # Correct for Postgres 17 and below. See the image note above before
       # changing either this path or the tag.
@@ -134,11 +141,11 @@ services:
   test:
     <<: *elixir-dev
     profiles: ["test"]
-    # Deliberately NOT `mix deps.get && mix test`. Elixir 1.18+ locks
-    # compilation, but that lock does not cover dependency *fetching*, and this
-    # service shares the `deps` volume with web. After changing mix.lock, run
-    # `docker compose up web` (or `docker compose run --rm test mix deps.get`)
-    # once before running the suite.
+    # The entrypoint syncs deps before running whatever command is passed, so
+    # `mix test`, `mix ci` and `mix precommit` all work after a mix.lock change
+    # without the caller remembering a prefix. The `deps` volume is shared with
+    # web and only seeded once, so it goes stale otherwise.
+    entrypoint: ["/app/scripts/dev-entrypoint.sh"]
     command: mix test
     environment:
       MIX_ENV: test

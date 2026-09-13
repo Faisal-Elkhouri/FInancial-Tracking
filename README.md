@@ -50,15 +50,25 @@ mix setup                   # deps.get + ecto.setup + assets setup/build
 mix phx.server              # or: iex -S mix phx.server
 ```
 
-This expects a Postgres server on `localhost:5432` with user/password
-`postgres`/`postgres`. Override via the `DATABASE_*` environment variables
-(see [Configuration](#configuration)). Then open <http://localhost:4000>.
+> **Not the supported path.** `config/dev.exs` and `config/test.exs` default
+> `DATABASE_HOST` to `db`, the Compose service name, because this project is
+> Docker-first (see [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md)). To run
+> on the host you must set `DATABASE_HOST=localhost` explicitly, along with the
+> other `DATABASE_*` variables.
+>
+> Be careful here: if you have a **native PostgreSQL** installed, it probably
+> already owns `localhost:5432`, and host-run `mix` commands will silently talk
+> to *that* server rather than the container's — two databases that look
+> identical and diverge. That is also why the dev stack publishes the container
+> on `15432` by default (`DB_HOST_PORT`).
+
+Then open <http://localhost:4000>.
 
 ---
 
 ## Production with Docker
 
-`docker-compose.prod.yml` builds a slim, self-contained OTP **release** (via the
+`compose.prod.yaml` builds a slim, self-contained OTP **release** (via the
 multi-stage `Dockerfile`), runs database migrations on boot, then starts the
 server. Unlike dev, it requires real secrets.
 
@@ -69,7 +79,7 @@ cp .env.example .env
 #   DATABASE_PASSWORD -> a real password (not the dev default)
 #   PHX_HOST          -> the hostname users will reach the app at
 
-docker compose -f docker-compose.prod.yml up --build -d
+docker compose -f compose.prod.yaml up --build -d
 ```
 
 Then open <http://localhost:4000> (or your `PHX_HOST`).
@@ -128,9 +138,9 @@ and Docker tooling (nothing hand-rolled):
    `rel/overlays/bin/{migrate,server}` release scripts used in production.
 
 3. **Added the Docker Compose stacks** so Postgres and the app run together:
-   - `docker-compose.yml` — development: Postgres 17 + the app via `Dockerfile.dev`
+   - `compose.yaml` — development: Postgres 17 + the app via `Dockerfile.dev`
      with code reloading and named volumes for `deps`/`_build`.
-   - `docker-compose.prod.yml` — production: Postgres 17 + the release image,
+   - `compose.prod.yaml` — production: Postgres 17 + the release image,
      running `bin/migrate` then `bin/server` on boot.
    - `Dockerfile.dev` — a dev image that keeps the full Elixir toolchain (plus
      `inotify-tools` for live reload).
@@ -153,8 +163,8 @@ assets/                        # JS/CSS (built by esbuild + Tailwind)
 rel/overlays/bin/              # release migrate/server scripts
 Dockerfile                     # production OTP release (multi-stage)
 Dockerfile.dev                 # development image
-docker-compose.yml             # dev stack (default)
-docker-compose.prod.yml        # production stack
+compose.yaml             # dev stack (default)
+compose.prod.yaml        # production stack
 .env.example                   # environment variable template
 ```
 
@@ -174,8 +184,8 @@ docker compose down            # stop (add -v to drop the DB volume)
 docker compose logs -f web     # tail app logs
 
 # Docker (prod)
-docker compose -f docker-compose.prod.yml up --build -d
-docker compose -f docker-compose.prod.yml down
+docker compose -f compose.prod.yaml up --build -d
+docker compose -f compose.prod.yaml down
 ```
 
 ## Learn more

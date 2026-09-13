@@ -42,3 +42,7 @@ knowledge base/office-migrations.md
 
 # Local secret material for the prod rehearsal (see compose.prod.yaml).
 /secrets/
+
+# Database dumps (see scripts/pg-backup.sh). Never commit these - they are
+# a full copy of production financial data.
+/backups/

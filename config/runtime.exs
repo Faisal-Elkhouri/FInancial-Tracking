@@ -119,7 +119,11 @@ if config_env() == :prod do
   # For a plain-HTTP local rehearsal, set PHX_SCHEME=http and PHX_URL_PORT=4000
   # so generated URLs and the origin check match what the browser actually sends.
   url_scheme = System.get_env("PHX_SCHEME") || "https"
-  url_port = String.to_integer(System.get_env("PHX_URL_PORT") || if(url_scheme == "https", do: "443", else: "80"))
+
+  url_port =
+    String.to_integer(
+      System.get_env("PHX_URL_PORT") || if(url_scheme == "https", do: "443", else: "80")
+    )
 
   config :financial_tracking, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 

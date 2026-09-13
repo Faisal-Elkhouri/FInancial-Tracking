@@ -26,14 +26,21 @@ There are two independent Compose stacks in this repo:
 
 | | Dev | Prod |
 |---|---|---|
-| Compose file | `docker-compose.yml` (the default) | `docker-compose.prod.yml` |
+| Compose file | `compose.yaml` (the default) | `compose.prod.yaml` |
 | App image | `Dockerfile.dev` — full Elixir toolchain | `Dockerfile` — multi-stage OTP release |
 | How code runs | Source bind-mounted, recompiled live | Compiled release baked into the image |
 | Code reloading | Yes (`inotify-tools` + Phoenix live reload) | No — rebuild + redeploy to change code |
-| Services | `db`, `web`, `livebook`, `test` (profile) | `db`, `web` |
+| Services | `db`, `web`, `livebook`, `test` (profile) | `db`, `migrate` (one-shot), `web`, `backup` (profile) |
 | Database | `financial_tracking_dev` | `financial_tracking_prod` |
-| Start command | `docker compose up` | `docker compose -f docker-compose.prod.yml up --build -d` |
-| Secrets required | None (safe defaults) | `DATABASE_PASSWORD`, `SECRET_KEY_BASE` — refuses to start without them |
+| Start command | `docker compose up` | `docker compose -f compose.prod.yaml up --build -d` |
+| Secrets required | None (safe defaults) | File-backed in `./secrets/` — run `./scripts/gen-secrets.sh`. Plus `PHX_HOST`; all three refuse to start without them |
+
+> **Prod here is a faithful local *rehearsal*, not a deployment.** The
+> deployment target is not yet chosen, so `compose.prod.yaml` exercises the real
+> release image, real migrations and real shutdown behaviour, but does not
+> pretend to be a hardened public deployment — there is no TLS front door yet.
+> See [`INFRASTRUCTURE_BACKLOG.md`](INFRASTRUCTURE_BACKLOG.md) for what is
+> deliberately outstanding and why.
 
 The guiding principle: **dev optimizes for iteration speed, prod optimizes for
 immutability and small attack surface.** They intentionally share as little as
@@ -56,7 +63,7 @@ Rebar, `build-essential`, git, `inotify-tools`). It:
    bind-mounted over `/app` (see below), so the container always sees your
    current working tree.
 
-### 2.2 The dev stack (`docker-compose.yml`)
+### 2.2 The dev stack (`compose.yaml`)
 
 **`db`** — `postgres:17` with credentials from env vars (safe defaults for
 dev). Port 5432 is published to the host purely as a convenience so you can
@@ -130,7 +137,7 @@ The layer ordering in both Dockerfiles is deliberate: things that change
 rarely (system packages, deps) come before things that change often (source),
 maximizing Docker layer-cache hits and keeping rebuilds fast.
 
-### 2.4 The prod stack (`docker-compose.prod.yml`)
+### 2.4 The prod stack (`compose.prod.yaml`)
 
 - `db` has **no published port** — the database is reachable only on the
   internal Compose network. Its password is *required* (`:?` guard, §3).
@@ -316,8 +323,55 @@ docker compose run --rm test mix precommit
 
 runs `compile --warnings-as-errors`, checks for unused deps, formats, and
 runs the tests (`precommit` alias in `mix.exs`, pinned to the test env). Make
-passing this the bar for every commit; it is also exactly what a CI job
-should run.
+passing this the bar for every commit.
+
+**CI runs `mix ci`, not `mix precommit` — and the difference matters.**
+`precommit` *fixes* things: `format` rewrites files and `deps.unlock --unused`
+edits `mix.lock`. That is what you want locally and exactly what you do not
+want in CI, where it would silently reformat a badly formatted branch, pass,
+and leave the checkout dirty. `ci` asserts instead:
+
+```sh
+docker compose run --rm test mix ci
+```
+
+| | `precommit` (local) | `ci` (pipeline) |
+|---|---|---|
+| formatting | `format` — rewrites | `format --check-formatted` — fails |
+| lockfile | `deps.unlock --unused` — edits | `deps.unlock --check-unused` — fails |
+| security | — | `deps.audit`, `hex.audit`, `sobelow` |
+
+> Historical note: `precommit` previously read `compile --warning-as-errors`
+> (singular). `mix compile` ignores unknown switches silently — a completely
+> bogus flag also exits 0 — so the warnings-as-errors gate had never actually
+> run. Both aliases now use the documented `--warnings-as-errors`.
+
+The security tasks are not decoration for an app that handles money. On their
+very first run they found, and the same commit fixed:
+
+| Found by | Finding |
+|---|---|
+| `deps.audit` | **High** — Phoenix unbounded channel joins per transport (DoS). `phoenix 1.8.8 → 1.8.13` |
+| `deps.audit` | Moderate — Phoenix Presence keys colliding with `Object.prototype` |
+| `hex.audit` | **Medium — SQL injection** via the `:comment` option in `Postgrex.stream/4` |
+| `hex.audit` | Low — SQL injection via unescaped dollar-quote in `Postgrex.Notifications` |
+| `hex.audit` | Open redirect in `Phoenix.LiveView.validate_local_url!/2` |
+| `hex.audit` | Retired release: `plug 1.20.1` (accidental breaking change) |
+
+**Keep both.** They query different databases — `hex.audit` uses Hex's own
+advisory data plus retired releases, `deps.audit` (mix_audit) uses the Elixir
+Security Advisories repo — and as the table shows, each caught real findings
+the other missed.
+
+> Gotcha worth knowing if you edit the alias: `hex.audit` is invoked as
+> `cmd mix hex.audit`, i.e. a subprocess. Once anything in the same Mix
+> invocation has compiled the project, the Hex archive drops off the code path
+> and the task fails with *"The task hex.audit could not be found"* — which
+> reads like a missing dependency rather than a load-path problem.
+
+`.sobelow-skips` records findings consciously accepted (see
+[`INFRASTRUCTURE_BACKLOG.md`](INFRASTRUCTURE_BACKLOG.md) §9), so that *new*
+findings still fail the build.
 
 ---
 
@@ -366,9 +420,9 @@ docker compose run --rm test
 docker compose run --rm test mix precommit
 
 # Prod
-docker compose -f docker-compose.prod.yml up --build -d   # build + deploy
-docker compose -f docker-compose.prod.yml logs -f web
-docker compose -f docker-compose.prod.yml down             # stop (data survives)
+docker compose -f compose.prod.yaml up --build -d   # build + deploy
+docker compose -f compose.prod.yaml logs -f web
+docker compose -f compose.prod.yaml down             # stop (data survives)
 ```
 
 When dependencies change (`mix.exs` / `mix.lock`): the dev `web` command runs
@@ -397,10 +451,33 @@ The habits that keep this production-grade as the project grows:
    change, never edit applied ones, keep them non-destructive relative to
    the currently running code (the old code briefly runs against the new
    schema during deploys).
-5. **Back up prod data.** The `pgdata_prod` volume is the only copy.
-   Schedule `pg_dump` (e.g.
-   `docker compose -f docker-compose.prod.yml exec db pg_dump -U postgres financial_tracking_prod > backup.sql`)
-   and store dumps off the machine. Test a restore before you need one.
+5. **Back up prod data.** The `pgdata_prod` volume is the only copy, so this
+   is the highest-stakes item on this list. There is now a `backup` service:
+
+   ```sh
+   docker compose -f compose.prod.yaml run --rm backup        # dump + verify + prune
+   ```
+
+   It writes a compressed custom-format dump to `./backups`, verifies the
+   archive is readable with `pg_restore --list` before trusting it, and prunes
+   dumps older than `BACKUP_RETENTION_DAYS` (default 14). Schedule it from the
+   host's own scheduler rather than running a cron daemon inside the stack.
+
+   **A dump on the same disk as the database is not a backup.** Copy them
+   off-host. Note that the `backup` service sits on the `internal: true`
+   `backend` network, so shipping to object storage needs `frontend` too.
+
+   **And a backup you have never restored is a hypothesis.** `pg-restore.sh`
+   has a drill mode for exactly this — it restores into a throwaway database
+   and prints row counts, touching nothing real:
+
+   ```sh
+   docker compose -f compose.prod.yaml run --rm \
+     -e RESTORE_TARGET_DB=restore_drill \
+     --entrypoint /usr/local/bin/pg-restore backup /backups/<file>.dump
+   ```
+
+   Restoring over the live database deliberately refuses unless `CONFIRM=yes`.
 6. **Pin and upgrade deliberately.** Elixir/OTP/Debian versions are pinned
    as `ARG`s at the top of both Dockerfiles — keep dev and prod pins
    identical, and bump them together in a dedicated commit that passes the

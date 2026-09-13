@@ -5,7 +5,10 @@ defmodule FinancialTracking.MixProject do
     [
       app: :financial_tracking,
       version: "0.1.0",
-      elixir: "~> 1.15",
+      # Matches what we actually build and test against (see the ARG pins in
+      # Dockerfile / Dockerfile.dev). The previous "~> 1.15" claimed support for
+      # five minor versions that were never exercised.
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -27,7 +30,7 @@ defmodule FinancialTracking.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [precommit: :test, ci: :test]
     ]
   end
 
@@ -65,7 +68,18 @@ defmodule FinancialTracking.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+
+      # Quality and security gates. All dev/test only and runtime: false, so
+      # none of these reach the production release.
+      #
+      # mix_audit  - known CVEs in the dependency tree
+      # sobelow    - Phoenix-specific static analysis (XSS via raw/1, missing
+      #              CSRF, config leaks). Table stakes for an app handling money.
+      # credo      - style/consistency; run non-strict to start.
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -88,7 +102,48 @@ defmodule FinancialTracking.MixProject do
         "esbuild financial_tracking --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]
+      # Local gate: fixes what it can, then runs the suite. Run before committing.
+      #
+      # NOTE the flag spelling. It was previously "--warning-as-errors"
+      # (singular), and `mix compile` ignores unknown switches silently - a
+      # bogus flag also exits 0 - so this gate had never actually run.
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "test"
+      ],
+
+      # CI gate: identical intent, but ASSERTS instead of mutating.
+      # `format` rewrites files and `deps.unlock --unused` edits mix.lock, so
+      # running `precommit` in CI would let a badly formatted or lock-rotted
+      # branch go green while leaving the checkout dirty.
+      ci: [
+        "compile --warnings-as-errors",
+        "format --check-formatted",
+        "deps.unlock --check-unused",
+        # `cmd mix hex.audit`, not plain `hex.audit`, on purpose.
+        #
+        # Once anything in the same Mix invocation has compiled the project,
+        # the Hex archive is no longer on the code path and `hex.audit` fails
+        # with "The task hex.audit could not be found" - which reads like a
+        # missing dependency rather than a load-path problem. Running it as a
+        # subprocess gives it a fresh VM where the archive is loaded.
+        # Verified in the container; it works standalone and fails in-chain.
+        #
+        # hex.audit and deps.audit are NOT redundant: hex.audit queries Hex's
+        # own advisory database (plus retired releases), deps.audit checks the
+        # Elixir Security Advisories repo. Each has caught real findings the
+        # other missed - retired plug from one, postgrex SQL-injection
+        # advisories from the other.
+        "cmd mix hex.audit",
+        "deps.audit",
+        # --skip honours .sobelow-skips, which records findings we have
+        # explicitly accepted (see docs/INFRASTRUCTURE_BACKLOG.md). Any NEW
+        # finding still fails the build, which is the point.
+        "sobelow --skip --exit Low",
+        "test"
+      ]
     ]
   end
 end
