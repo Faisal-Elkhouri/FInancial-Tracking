@@ -19,7 +19,11 @@ set -eu
 
 PASSWORD_FILE="${PGPASSWORD_FILE:-/run/secrets/db_password}"
 if [ -r "$PASSWORD_FILE" ]; then
-  PGPASSWORD="$(cat "$PASSWORD_FILE")"
+  # tr, not $(cat): command substitution strips trailing NEWLINES but not a
+  # trailing CR, and the app side uses String.trim/1 which strips both. If the
+  # two disagree by one byte you get "password authentication failed" with a
+  # secret that looks identical on both sides.
+  PGPASSWORD="$(tr -d "\r\n" < "$PASSWORD_FILE")"
   export PGPASSWORD
 fi
 
