@@ -2,6 +2,23 @@ defmodule FinancialTracking.Tracker.Purchase do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{
+          id: integer() | nil,
+          name: String.t() | nil,
+          amount: Decimal.t() | nil,
+          origin_office_id: integer() | nil,
+          origin_office: FinancialTracking.Tracker.Office.t() | Ecto.Association.NotLoaded.t() | nil,
+          is_tax: boolean() | nil,
+          includes_tax: boolean() | nil,
+          purchased_at: DateTime.t() | nil,
+          slbo_project_code: integer() | nil,
+          concur_expense_report: String.t() | nil,
+          notes: String.t() | nil,
+          event: integer() | nil,
+          inserted_at: DateTime.t() | nil,
+          updated_at: DateTime.t() | nil
+        }
+
   schema "purchases" do
     field :name, :string
     field :amount, :decimal

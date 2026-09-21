@@ -2,6 +2,18 @@ defmodule FinancialTracking.Tracker.ExecutiveBudget do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{
+          id: integer() | nil,
+          line_item: String.t() | nil,
+          allocated: Decimal.t() | nil,
+          office_id: integer() | nil,
+          office: FinancialTracking.Tracker.Office.t() | Ecto.Association.NotLoaded.t() | nil,
+          parent_line_item_id: integer() | nil,
+          parent_line_item: t() | Ecto.Association.NotLoaded.t() | nil,
+          inserted_at: DateTime.t() | nil,
+          updated_at: DateTime.t() | nil
+        }
+
   schema "executive_budget" do
     field :line_item, :string
     field :allocated, :decimal

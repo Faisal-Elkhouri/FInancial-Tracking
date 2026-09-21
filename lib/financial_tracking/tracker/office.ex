@@ -2,6 +2,16 @@ defmodule FinancialTracking.Tracker.Office do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{
+          id: integer() | nil,
+          name: String.t() | nil,
+          parent_id: integer() | nil,
+          parent: t() | Ecto.Association.NotLoaded.t() | nil,
+          children: [t()] | Ecto.Association.NotLoaded.t(),
+          inserted_at: DateTime.t() | nil,
+          updated_at: DateTime.t() | nil
+        }
+
   schema "offices" do
     field :name, :string
     belongs_to :parent, __MODULE__
