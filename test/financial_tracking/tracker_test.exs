@@ -4,7 +4,7 @@ defmodule FinancialTracking.TrackerTest do
   import FinancialTracking.TrackerFixtures
 
   alias FinancialTracking.Tracker
-  alias FinancialTracking.Tracker.{ExecutiveBudget, Office, Purchase}
+  alias FinancialTracking.Tracker.{ExecutiveBudget, Office, Project, Purchase, SinglePurchase}
 
   describe "offices" do
     test "create_office/1 with valid attrs" do
@@ -133,6 +133,254 @@ defmodule FinancialTracking.TrackerTest do
 
       assert {:ok, %Purchase{}} = Tracker.delete_purchase(updated)
       assert_raise Ecto.NoResultsError, fn -> Tracker.get_purchase!(purchase.id) end
+    end
+  end
+
+  describe "single purchases" do
+    test "create_single_purchase/2 attaches the single purchase to its purchase" do
+      purchase = purchase_fixture()
+
+      assert {:ok, %SinglePurchase{} = single} =
+               Tracker.create_single_purchase(purchase, %{
+                 projects: "a",
+                 title: "Stapler",
+                 cost: "12.50"
+               })
+
+      assert single.big_purchase_id == purchase.id
+      assert single.cost == Decimal.new("12.50")
+      refute single.deleted
+    end
+
+    test "create_single_purchase/2 rejects invalid attrs" do
+      purchase = purchase_fixture()
+
+      assert {:error, changeset} = Tracker.create_single_purchase(purchase, %{})
+      assert %{title: ["can't be blank"]} = errors_on(changeset)
+
+      assert {:error, changeset} =
+               Tracker.create_single_purchase(purchase, %{projects: "a", title: "x", cost: "-1"})
+
+      assert %{cost: [_]} = errors_on(changeset)
+    end
+
+    test "a single purchase requires a purchase that exists" do
+      changeset =
+        SinglePurchase.changeset(%SinglePurchase{}, %{projects: "a", title: "x"})
+
+      assert %{big_purchase_id: ["can't be blank"]} = errors_on(changeset)
+
+      changeset =
+        SinglePurchase.changeset(%SinglePurchase{}, %{
+          projects: "a",
+          title: "x",
+          big_purchase_id: 0
+        })
+
+      assert {:error, changeset} = Repo.insert(changeset)
+      assert %{big_purchase: ["does not exist"]} = errors_on(changeset)
+    end
+
+    test "a purchase can have many single purchases, or none" do
+      purchase = purchase_fixture()
+      assert Tracker.list_single_purchases(purchase) == []
+
+      a = single_purchase_fixture(purchase)
+      b = single_purchase_fixture(purchase)
+      _other = single_purchase_fixture()
+
+      assert purchase |> Tracker.list_single_purchases() |> Enum.map(& &1.id) |> Enum.sort() ==
+               [a.id, b.id]
+    end
+
+    test "soft_delete_single_purchase/1 hides the row but keeps it" do
+      single = single_purchase_fixture()
+
+      assert {:ok, deleted} = Tracker.soft_delete_single_purchase(single)
+      assert deleted.deleted
+      assert %DateTime{} = deleted.deleted_on
+
+      assert_raise Ecto.NoResultsError, fn -> Tracker.get_single_purchase!(single.id) end
+      assert Repo.get(SinglePurchase, single.id).deleted
+    end
+  end
+
+  describe "projects" do
+    test "create_project/1 defaults to an active project" do
+      assert {:ok, %Project{status: :active, deleted: false}} =
+               Tracker.create_project(%{title: "Rollout"})
+    end
+
+    test "create_project/1 stores the basic fields" do
+      attrs = %{
+        title: "Rollout",
+        description: "Phase one",
+        status: :planned,
+        starts_on: ~D[2026-10-01],
+        ends_on: ~D[2026-12-31],
+        budget: "1500.50"
+      }
+
+      assert {:ok, project} = Tracker.create_project(attrs)
+      assert project.status == :planned
+      assert project.starts_on == ~D[2026-10-01]
+      assert Decimal.equal?(project.budget, Decimal.new("1500.50"))
+    end
+
+    test "create_project/1 requires a title" do
+      assert {:error, changeset} = Tracker.create_project(%{})
+      assert %{title: ["can't be blank"]} = errors_on(changeset)
+    end
+
+    test "create_project/1 rejects a negative budget, an unknown status and reversed dates" do
+      assert {:error, changeset} =
+               Tracker.create_project(%{
+                 title: "x",
+                 budget: "-1",
+                 status: "bogus",
+                 starts_on: ~D[2026-10-01],
+                 ends_on: ~D[2026-09-01]
+               })
+
+      errors = errors_on(changeset)
+      assert errors[:budget]
+      assert errors[:status]
+      assert errors[:ends_on]
+    end
+
+    test "update_project/2 updates the project" do
+      project = project_fixture()
+      assert {:ok, updated} = Tracker.update_project(project, %{status: :completed})
+      assert updated.status == :completed
+    end
+  end
+
+  describe "project offices" do
+    test "assign_office/2 links an office to a project, and offices can be shared" do
+      project = project_fixture()
+      other_project = project_fixture()
+      office = office_fixture()
+
+      assert {:ok, _} = Tracker.assign_office(project, office)
+      assert {:ok, _} = Tracker.assign_office(other_project, office)
+
+      assert Enum.map(Tracker.list_project_offices(project), & &1.id) == [office.id]
+
+      assert Enum.sort(Enum.map(Tracker.list_office_projects(office), & &1.id)) ==
+               Enum.sort([project.id, other_project.id])
+    end
+
+    test "a project can have several offices" do
+      project = project_fixture()
+      a = office_fixture(%{name: "A office #{System.unique_integer([:positive])}"})
+      b = office_fixture(%{name: "B office #{System.unique_integer([:positive])}"})
+      project_office_fixture(project, b)
+      project_office_fixture(project, a)
+
+      assert Enum.map(Tracker.list_project_offices(project), & &1.id) == [a.id, b.id]
+    end
+
+    test "assign_office/2 refuses to assign the same office twice" do
+      {project, office} = project_office_fixture()
+
+      assert {:error, changeset} = Tracker.assign_office(project, office)
+      assert %{office_id: ["is already assigned to this project"]} = errors_on(changeset)
+    end
+
+    test "assign_office/2 returns an error changeset for an office that doesn't exist" do
+      project = project_fixture()
+
+      assert {:error, changeset} = Tracker.assign_office(project, %Office{id: -1})
+      assert %{office: ["does not exist"]} = errors_on(changeset)
+    end
+
+    test "unassign_office/2 removes the link and is a no-op if there isn't one" do
+      {project, office} = project_office_fixture()
+
+      assert :ok = Tracker.unassign_office(project, office)
+      assert Tracker.list_project_offices(project) == []
+      assert :ok = Tracker.unassign_office(project, office)
+    end
+
+    test "list_office_projects/1 hides soft-deleted projects" do
+      {project, office} = project_office_fixture()
+      {:ok, _} = Tracker.soft_delete_project(project)
+
+      assert Tracker.list_office_projects(office) == []
+    end
+
+    test "delete_office/1 refuses while the office is assigned to a project" do
+      {project, office} = project_office_fixture()
+
+      assert {:error, changeset} = Tracker.delete_office(office)
+      assert %{projects: ["office is still assigned to projects"]} = errors_on(changeset)
+
+      :ok = Tracker.unassign_office(project, office)
+      assert {:ok, _} = Tracker.delete_office(office)
+    end
+  end
+
+  describe "soft delete" do
+    test "soft_delete_project/1 hides the project from list and get" do
+      project = project_fixture()
+      keep = project_fixture()
+
+      assert {:ok, %Project{deleted: true, deleted_on: %DateTime{}}} =
+               Tracker.soft_delete_project(project)
+
+      assert Enum.map(Tracker.list_projects(), & &1.id) == [keep.id]
+      assert_raise Ecto.NoResultsError, fn -> Tracker.get_project!(project.id) end
+      assert Repo.get(Project, project.id)
+    end
+
+    test "soft_delete_purchase/1 hides the purchase and cascades to its singles" do
+      purchase = purchase_fixture()
+      single = single_purchase_fixture(purchase)
+      other = single_purchase_fixture()
+
+      assert {:ok, %Purchase{deleted: true, deleted_on: deleted_on}} =
+               Tracker.soft_delete_purchase(purchase)
+
+      assert_raise Ecto.NoResultsError, fn -> Tracker.get_purchase!(purchase.id) end
+      refute purchase.id in Enum.map(Tracker.list_purchases(), & &1.id)
+      assert Tracker.list_single_purchases(purchase) == []
+
+      cascaded = Repo.get!(SinglePurchase, single.id)
+      assert cascaded.deleted
+      assert cascaded.deleted_on == deleted_on
+
+      # Unrelated single purchases are untouched.
+      refute Repo.get!(SinglePurchase, other.id).deleted
+    end
+
+    test "soft_delete_purchase/1 keeps the original deleted_on of already-deleted singles" do
+      purchase = purchase_fixture()
+      single = single_purchase_fixture(purchase)
+      {:ok, single} = Tracker.soft_delete_single_purchase(single)
+
+      # Backdate so the assertion can't pass by both timestamps landing in the same second.
+      past = DateTime.add(single.deleted_on, -3600)
+
+      from(s in SinglePurchase, where: s.id == ^single.id)
+      |> Repo.update_all(set: [deleted_on: past])
+
+      assert {:ok, _} = Tracker.soft_delete_purchase(purchase)
+      assert Repo.get!(SinglePurchase, single.id).deleted_on == past
+    end
+
+    test "soft-deleting twice is a no-op that keeps the first deleted_on" do
+      {:ok, first} = Tracker.soft_delete_purchase(purchase_fixture())
+      assert {:ok, again} = Tracker.soft_delete_purchase(first)
+      assert again.deleted_on == first.deleted_on
+    end
+
+    test "a soft-deleted purchase still blocks deleting its office" do
+      office = office_fixture()
+      purchase = purchase_fixture(%{origin_office_id: office.id})
+      {:ok, _} = Tracker.soft_delete_purchase(purchase)
+
+      assert {:error, changeset} = Tracker.delete_office(office)
+      assert %{purchases: ["office still has purchases"]} = errors_on(changeset)
     end
   end
 

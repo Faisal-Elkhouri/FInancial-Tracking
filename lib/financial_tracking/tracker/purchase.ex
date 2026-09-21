@@ -7,7 +7,8 @@ defmodule FinancialTracking.Tracker.Purchase do
           name: String.t() | nil,
           amount: Decimal.t() | nil,
           origin_office_id: integer() | nil,
-          origin_office: FinancialTracking.Tracker.Office.t() | Ecto.Association.NotLoaded.t() | nil,
+          origin_office:
+            FinancialTracking.Tracker.Office.t() | Ecto.Association.NotLoaded.t() | nil,
           is_tax: boolean() | nil,
           includes_tax: boolean() | nil,
           purchased_at: DateTime.t() | nil,
@@ -15,6 +16,10 @@ defmodule FinancialTracking.Tracker.Purchase do
           concur_expense_report: String.t() | nil,
           notes: String.t() | nil,
           event: integer() | nil,
+          deleted: boolean(),
+          deleted_on: DateTime.t() | nil,
+          single_purchases:
+            [FinancialTracking.Tracker.SinglePurchase.t()] | Ecto.Association.NotLoaded.t(),
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
@@ -31,6 +36,13 @@ defmodule FinancialTracking.Tracker.Purchase do
     field :notes, :string
     # Event can be a not-event. Figure out how to do this later
     field :event, :integer
+    field :deleted, :boolean, default: false
+    field :deleted_on, :utc_datetime
+
+    # Zero or more. The FK is on_delete: :restrict at the DB level, so no
+    # :on_delete option here — a purchase with singles can't be deleted.
+    has_many :single_purchases, FinancialTracking.Tracker.SinglePurchase,
+      foreign_key: :big_purchase_id
 
     timestamps(type: :utc_datetime)
   end

@@ -7,11 +7,13 @@ defmodule FinancialTracking.Tracker.SinglePurchase do
           projects: String.t() | nil,
           title: String.t() | nil,
           big_purchase_id: integer() | nil,
-          big_purchase: FinancialTracking.Tracker.Purchase.t() | Ecto.Association.NotLoaded.t() | nil,
+          big_purchase: FinancialTracking.Tracker.Purchase.t() | Ecto.Association.NotLoaded.t(),
           cost: Decimal.t() | nil,
           link: String.t() | nil,
           purchased_at: DateTime.t() | nil,
           notes: String.t() | nil,
+          deleted: boolean(),
+          deleted_on: DateTime.t() | nil,
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
@@ -24,6 +26,8 @@ defmodule FinancialTracking.Tracker.SinglePurchase do
     field :link, :string
     field :purchased_at, :utc_datetime
     field :notes, :string
+    field :deleted, :boolean, default: false
+    field :deleted_on, :utc_datetime
 
     timestamps(type: :utc_datetime)
   end
@@ -40,8 +44,8 @@ defmodule FinancialTracking.Tracker.SinglePurchase do
       :purchased_at,
       :notes
     ])
-    |> validate_required([:projects, :title])
+    |> validate_required([:projects, :title, :big_purchase_id])
     |> validate_number(:cost, greater_than_or_equal_to: 0)
-    |> foreign_key_constraint(:big_purchase_id)
+    |> assoc_constraint(:big_purchase)
   end
 end

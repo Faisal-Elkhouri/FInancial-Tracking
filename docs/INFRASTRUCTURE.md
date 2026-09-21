@@ -505,8 +505,8 @@ assume.
 ### 10.1 All domain logic goes through the context
 
 `FinancialTracking.Tracker` (`lib/financial_tracking/tracker.ex`) is the
-**only** public API for offices, purchases, and executive budget line
-items. The layering is:
+**only** public API for offices, projects (and their office assignments),
+purchases, and executive budget line items. The layering is:
 
 ```
 web layer (controllers / LiveViews)  →  context (Tracker)  →  schemas + Repo
@@ -551,6 +551,8 @@ Policy (implemented in migration `20260703120000_restrict_financial_fks`):
 | `purchases.origin_office_id` → offices | `:restrict` | A purchase must not silently lose its origin; deleting an office with purchases must fail loudly |
 | `executive_budget.office_id` → offices | `:restrict` | Changeset requires the field, so nilifying would create rows the app considers invalid |
 | `offices.parent_id` → offices | `:restrict` | Delete/reparent children before deleting a parent office |
+| `project_offices.office_id` → offices | `:restrict` | An office can't be deleted while a project is assigned to it; unassign it first |
+| `project_offices.project_id` → projects | `:delete_all` | Deliberate: a link row is meaningless without its project (projects are soft-deleted in practice, so this only fires on a hard delete) |
 | `executive_budget.parent_line_item_id` → itself | `:nilify_all` | Deliberate: deleting a parent line item *promotes* its children to top level |
 
 Rules for new foreign keys:
@@ -564,7 +566,7 @@ Rules for new foreign keys:
 - When a context delete can hit a `:restrict` FK, convert the raise into a
   user-facing error with `foreign_key_constraint/3` — see
   `Tracker.delete_office/1` for the pattern (it names each dependent kind:
-  sub-offices, purchases, budget line items).
+  sub-offices, purchases, budget line items, projects).
 
 ### 10.4 History of the July 2026 restructuring
 
