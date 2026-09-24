@@ -186,6 +186,18 @@ defmodule FinancialTracking.Tracker do
     )
   end
 
+  @doc """
+  Returns the purchases made by `office` itself, newest first. Purchases of its
+  sub-offices are not included.
+  """
+  def list_office_purchases(%Office{id: office_id}) do
+    Repo.all(
+      from p in Purchase,
+        where: p.origin_office_id == ^office_id and not p.deleted,
+        order_by: [desc: p.purchased_at, desc: p.id]
+    )
+  end
+
   def get_purchase!(id) do
     Repo.one!(from p in Purchase, where: p.id == ^id and not p.deleted)
   end

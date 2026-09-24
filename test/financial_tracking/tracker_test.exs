@@ -125,6 +125,22 @@ defmodule FinancialTracking.TrackerTest do
       assert Enum.map(Tracker.list_purchases(), & &1.id) == [newer.id, older.id]
     end
 
+    test "list_office_purchases/1 returns only that office's live purchases, newest first" do
+      office = office_fixture()
+
+      older =
+        purchase_fixture(%{origin_office_id: office.id, purchased_at: ~U[2026-01-01 00:00:00Z]})
+
+      newer =
+        purchase_fixture(%{origin_office_id: office.id, purchased_at: ~U[2026-06-01 00:00:00Z]})
+
+      deleted = purchase_fixture(%{origin_office_id: office.id})
+      {:ok, _} = Tracker.soft_delete_purchase(deleted)
+      _other_office = purchase_fixture()
+
+      assert Enum.map(Tracker.list_office_purchases(office), & &1.id) == [newer.id, older.id]
+    end
+
     test "update_purchase/2 and delete_purchase/1 round-trip" do
       purchase = purchase_fixture()
 

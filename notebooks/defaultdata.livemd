@@ -1,0 +1,69 @@
+# Default Data
+
+## Section
+
+```elixir
+alias FinancialTracking.Repo
+alias FinancialTracking.Tracker
+```
+
+```elixir
+tree = [
+  {"Finance", ["Accounts Payable", "Payroll"]},
+  {"Operations", ["Facilities", "IT"]},
+  {"Executive", []}
+]
+
+find_or_create = fn name, parent_id ->
+  case Enum.find(Tracker.list_offices(), &(&1.name == name)) do
+    nil -> Tracker.create_office(%{name: name, parent_id: parent_id})
+    office -> {:ok, office}
+  end
+end
+
+for {parent_name, children} <- tree do
+  {:ok, parent} = find_or_create.(parent_name, nil)
+
+  for child_name <- children do
+    {:ok, _child} = find_or_create.(child_name, parent.id)
+  end
+end
+
+Tracker.list_offices() |> Enum.map(&{&1.id, &1.name, &1.parent_id})
+```
+
+```elixir
+office = fn name ->
+  Enum.find(Tracker.list_offices(), &(&1.name == name)) ||
+    raise "no office named #{inspect(name)}"
+end
+
+```
+
+```elixir
+items = [
+  %{title: "Monitor", projects: "Website redesign", cost: "249.99"},
+  %{title: "Keyboard", projects: "Website redesign", cost: "89.00"},
+  %{title: "Dock", projects: "Onboarding", cost: "160.00"}
+]
+
+total = items |> Enum.map(&Decimal.new(&1.cost)) |> Enum.reduce(&Decimal.add/2)
+
+{:ok, order} =
+  Repo.transaction(fn ->
+    {:ok, purchase} =
+      Tracker.create_purchase(%{
+        name: "Q3 equipment order",
+        amount: total,
+        origin_office_id: office.("IT").id,
+        purchased_at: ~U[2026-09-15 14:00:00Z]
+      })
+
+    for item <- items do
+      {:ok, _} =
+        Tracker.create_single_purchase(purchase, Map.put(item, :purchased_at, purchase.purchased_at))
+    end
+
+    purchase
+  end)
+```

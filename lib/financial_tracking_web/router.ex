@@ -18,6 +18,7 @@ defmodule FinancialTrackingWeb.Router do
     pipe_through :browser
 
     live "/", HomeLive
+    live "/purchases", PurchasesLive
   end
 
   # Other scopes may use custom stacks.
