@@ -303,17 +303,34 @@ defmodule FinancialTrackingWeb.CoreComponents do
   end
 
   @doc """
-  Renders a table with generic styling.
+  Renders a table in the style of a Notion table view: light gridlines, muted
+  header labels with an optional type icon, and a header that stays put while
+  the rows scroll.
+
+  The table fills its container's width and scrolls sideways inside its own
+  frame when the columns don't fit. Inside `<Layouts.app full_width>` it also
+  fills the remaining screen height on large screens and scrolls vertically.
+
+  Cells don't wrap by default so dates and amounts stay on one line; set `wrap`
+  on columns holding free text. Right-align columns of amounts so they line up
+  for comparison. A column's `icon` names the kind of value it holds (e.g.
+  `hero-calendar-days-micro` for dates), like Notion's property icons.
 
   ## Examples
 
-      <.table id="users" rows={@users}>
+      <.table id="users" rows={@users} caption="Users">
         <:col :let={user} label="id">{user.id}</:col>
-        <:col :let={user} label="username">{user.username}</:col>
+        <:col :let={user} label="username" icon="hero-bars-3-bottom-left-micro">
+          {user.username}
+        </:col>
+        <:col :let={user} label="Balance" align="right" icon="hero-hashtag-micro">
+          {user.balance}
+        </:col>
       </.table>
   """
   attr :id, :string, required: true
   attr :rows, :list, required: true
+  attr :caption, :string, default: nil, doc: "describes the table to assistive technology"
   attr :row_id, :any, default: nil, doc: "the function for generating the row id"
   attr :row_click, :any, default: nil, doc: "the function for handling phx-click on each row"
 
@@ -323,6 +340,9 @@ defmodule FinancialTrackingWeb.CoreComponents do
 
   slot :col, required: true do
     attr :label, :string
+    attr :align, :string, values: ~w(left right center)
+    attr :icon, :string, doc: "a hero icon shown before the label"
+    attr :wrap, :boolean, doc: "lets long text wrap instead of widening the column"
   end
 
   slot :action, doc: "the slot for showing user actions in the last table column"
@@ -334,36 +354,77 @@ defmodule FinancialTrackingWeb.CoreComponents do
       end
 
     ~H"""
-    <table class="table table-zebra">
-      <thead>
-        <tr>
-          <th :for={col <- @col}>{col[:label]}</th>
-          <th :if={@action != []}>
-            <span class="sr-only">{gettext("Actions")}</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody id={@id} phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}>
-        <tr :for={row <- @rows} id={@row_id && @row_id.(row)}>
-          <td
-            :for={col <- @col}
-            phx-click={@row_click && @row_click.(row)}
-            class={@row_click && "hover:cursor-pointer"}
+    <div
+      id={"#{@id}-frame"}
+      role="region"
+      aria-label={@caption}
+      tabindex="0"
+      class="table-frame min-h-0 overflow-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    >
+      <table class="w-full border-separate border-spacing-0 text-sm tabular-nums">
+        <caption :if={@caption} class="sr-only">{@caption}</caption>
+        <thead>
+          <tr>
+            <th
+              :for={col <- @col}
+              scope="col"
+              class={[
+                "sticky top-0 z-10 whitespace-nowrap border-y border-r border-base-content/10 bg-base-100 px-2 py-1.5 font-normal text-base-content/60 last:border-r-0",
+                cell_align(col[:align])
+              ]}
+            >
+              <span class="inline-flex items-center gap-1.5">
+                <.icon :if={col[:icon]} name={col[:icon]} class="size-4 shrink-0 opacity-80" />
+                {col[:label]}
+              </span>
+            </th>
+            <th
+              :if={@action != []}
+              scope="col"
+              class="sticky top-0 z-10 border-y border-base-content/10 bg-base-100 px-2 py-1.5"
+            >
+              <span class="sr-only">{gettext("Actions")}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody id={@id} phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}>
+          <tr
+            :for={row <- @rows}
+            id={@row_id && @row_id.(row)}
+            class="transition-colors duration-100 hover:bg-base-content/4"
           >
-            {render_slot(col, @row_item.(row))}
-          </td>
-          <td :if={@action != []} class="w-0 font-semibold">
-            <div class="flex gap-4">
-              <%= for action <- @action do %>
-                {render_slot(action, @row_item.(row))}
-              <% end %>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+            <td
+              :for={col <- @col}
+              phx-click={@row_click && @row_click.(row)}
+              class={[
+                "border-r border-b border-base-content/10 px-2 py-1.5 align-top last:border-r-0",
+                cell_align(col[:align]),
+                if(col[:wrap], do: "min-w-60", else: "whitespace-nowrap"),
+                @row_click && "hover:cursor-pointer"
+              ]}
+            >
+              {render_slot(col, @row_item.(row))}
+            </td>
+            <td
+              :if={@action != []}
+              class="w-0 border-b border-base-content/10 px-2 py-1.5 font-medium"
+            >
+              <div class="flex gap-4 whitespace-nowrap">
+                <%= for action <- @action do %>
+                  {render_slot(action, @row_item.(row))}
+                <% end %>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     """
   end
+
+  defp cell_align("right"), do: "text-right"
+  defp cell_align("center"), do: "text-center"
+  defp cell_align(_left), do: "text-left"
 
   @doc """
   Renders a data list.

@@ -85,6 +85,15 @@ defmodule FinancialTrackingWeb.PurchasesLiveTest do
     refute has_element?(view, "#purchases-#{deleted.id}")
   end
 
+  test "formats amounts with thousands separators", %{conn: conn} do
+    office = office_fixture()
+    purchase = purchase_fixture(%{origin_office_id: office.id, amount: "1234567.5"})
+
+    {:ok, view, _html} = live(conn, ~p"/purchases?#{[office_id: office.id]}")
+
+    assert has_element?(view, "#purchases-#{purchase.id} td", "$1,234,567.50")
+  end
+
   test "shows an empty state for an office with no purchases", %{conn: conn} do
     office = office_fixture()
 

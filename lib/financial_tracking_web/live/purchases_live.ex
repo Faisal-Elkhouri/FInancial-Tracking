@@ -70,7 +70,7 @@ defmodule FinancialTrackingWeb.PurchasesLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} full_width>
       <.header>
         Purchases
         <:subtitle :if={@office}>
@@ -78,21 +78,28 @@ defmodule FinancialTrackingWeb.PurchasesLive do
             @total
           )} total
         </:subtitle>
+        <:actions>
+          <.form
+            :if={@offices != []}
+            for={@form}
+            id="office-form"
+            phx-change="select_office"
+            class="w-48 sm:w-64"
+          >
+            <.input
+              field={@form[:office_id]}
+              type="select"
+              label="Office"
+              prompt="Choose an office"
+              options={Enum.map(@offices, &{&1.name, &1.id})}
+            />
+          </.form>
+        </:actions>
       </.header>
 
       <p :if={@offices == []} id="no-offices">
         There are no offices yet. Add an office before viewing purchases.
       </p>
-
-      <.form :if={@offices != []} for={@form} id="office-form" phx-change="select_office">
-        <.input
-          field={@form[:office_id]}
-          type="select"
-          label="Office"
-          prompt="Choose an office"
-          options={Enum.map(@offices, &{&1.name, &1.id})}
-        />
-      </.form>
 
       <p :if={@offices != [] && is_nil(@office)} id="no-office-selected">
         Choose an office to see its purchases.
@@ -102,20 +109,37 @@ defmodule FinancialTrackingWeb.PurchasesLive do
         {@office.name} has no purchases.
       </p>
 
-      <div :if={@office && @purchase_count > 0} class="overflow-x-auto">
-        <.table id="purchases" rows={@streams.purchases}>
-          <:col :let={{_id, purchase}} label="Date">{format_date(purchase.purchased_at)}</:col>
-          <:col :let={{_id, purchase}} label="Name">{purchase.name}</:col>
-          <:col :let={{_id, purchase}} label="Amount">{format_amount(purchase.amount)}</:col>
-          <:col :let={{_id, purchase}} label="Tax purchase">{yes_no(purchase.is_tax)}</:col>
-          <:col :let={{_id, purchase}} label="Includes tax">{yes_no(purchase.includes_tax)}</:col>
-          <:col :let={{_id, purchase}} label="SLBO code">{purchase.slbo_project_code}</:col>
-          <:col :let={{_id, purchase}} label="Concur report">
-            {purchase.concur_expense_report}
-          </:col>
-          <:col :let={{_id, purchase}} label="Notes">{purchase.notes}</:col>
-        </.table>
-      </div>
+      <.table
+        :if={@office && @purchase_count > 0}
+        id="purchases"
+        rows={@streams.purchases}
+        caption={"Purchases for #{@office.name}"}
+      >
+        <:col :let={{_id, purchase}} label="Date" icon="hero-calendar-days-micro">
+          {format_date(purchase.purchased_at)}
+        </:col>
+        <:col :let={{_id, purchase}} label="Name" icon="hero-bars-3-bottom-left-micro">
+          {purchase.name}
+        </:col>
+        <:col :let={{_id, purchase}} label="Amount" align="right" icon="hero-hashtag-micro">
+          {format_amount(purchase.amount)}
+        </:col>
+        <:col :let={{_id, purchase}} label="Tax purchase" icon="hero-check-micro">
+          <.checkmark value={purchase.is_tax} />
+        </:col>
+        <:col :let={{_id, purchase}} label="Includes tax" icon="hero-check-micro">
+          <.checkmark value={purchase.includes_tax} />
+        </:col>
+        <:col :let={{_id, purchase}} label="SLBO code" icon="hero-bars-3-bottom-left-micro">
+          {purchase.slbo_project_code}
+        </:col>
+        <:col :let={{_id, purchase}} label="Concur report" icon="hero-bars-3-bottom-left-micro">
+          {purchase.concur_expense_report}
+        </:col>
+        <:col :let={{_id, purchase}} label="Notes" icon="hero-bars-3-bottom-left-micro" wrap>
+          {purchase.notes}
+        </:col>
+      </.table>
     </Layouts.app>
     """
   end
@@ -129,13 +153,40 @@ defmodule FinancialTrackingWeb.PurchasesLive do
 
   defp format_amount(nil), do: "—"
 
-  defp format_amount(amount),
-    do: "$" <> (amount |> Decimal.round(2) |> Decimal.to_string(:normal))
+  defp format_amount(amount) do
+    rounded = Decimal.round(amount, 2)
+    sign = if Decimal.negative?(rounded), do: "-", else: ""
+    [whole, cents] = rounded |> Decimal.abs() |> Decimal.to_string(:normal) |> String.split(".")
+
+    sign <> "$" <> Regex.replace(~r/\B(?=(\d{3})+$)/, whole, ",") <> "." <> cents
+  end
 
   defp format_date(nil), do: "—"
   defp format_date(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d")
 
-  defp yes_no(true), do: "Yes"
-  defp yes_no(false), do: "No"
-  defp yes_no(nil), do: "—"
+  # A read-only checkbox, as Notion shows checkbox properties. The box itself is
+  # hidden from screen readers, which get "Yes" or "No" instead.
+  attr :value, :boolean, required: true
+
+  defp checkmark(%{value: nil} = assigns), do: ~H"—"
+
+  defp checkmark(assigns) do
+    ~H"""
+    <span class="flex h-5 items-center">
+      <span
+        aria-hidden="true"
+        class={[
+          "grid size-4 place-items-center rounded-[3px]",
+          if(@value,
+            do: "bg-info text-info-content",
+            else: "border-[1.5px] border-base-content/40"
+          )
+        ]}
+      >
+        <.icon :if={@value} name="hero-check-micro" class="size-3.5" />
+      </span>
+      <span class="sr-only">{if @value, do: "Yes", else: "No"}</span>
+    </span>
+    """
+  end
 end

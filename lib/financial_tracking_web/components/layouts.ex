@@ -31,12 +31,28 @@ defmodule FinancialTrackingWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
+  attr :full_width, :boolean,
+    default: false,
+    doc: """
+    spans the whole screen instead of a narrow column, for data-heavy pages.
+    On large screens the page is also held to the screen height so the last
+    child (e.g. a `<.table>`) can scroll inside it.
+    """
+
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
+    <main class={[
+      "px-4 sm:px-6 lg:px-8",
+      if(@full_width, do: "flex flex-col py-8 lg:h-dvh", else: "py-20")
+    ]}>
+      <div class={
+        if(@full_width,
+          do: "flex min-h-0 flex-1 flex-col gap-4",
+          else: "mx-auto max-w-2xl space-y-4"
+        )
+      }>
         {render_slot(@inner_block)}
       </div>
     </main>

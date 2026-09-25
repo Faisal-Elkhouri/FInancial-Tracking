@@ -91,6 +91,20 @@
   --noise: 0;
 }
 
+/* Edge shadows on a sideways-scrolling table, so a column cut off at the edge
+   (e.g. "$1,450" of "$1,450.00") isn't read as a whole value. The base-colored
+   covers scroll with the content and hide each shadow once that edge is
+   reached; the shadows themselves stay pinned to the frame. */
+.table-frame {
+  --edge-shadow: color-mix(in oklab, var(--color-base-content) 22%, transparent);
+  background:
+    linear-gradient(to right, var(--color-base-100) 40%, transparent) left / 2.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--color-base-100) 40%, transparent) right / 2.5rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--edge-shadow), transparent) left / 0.75rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--edge-shadow), transparent) right / 0.75rem 100% no-repeat scroll,
+    var(--color-base-100);
+}
+
 /* Add variants based on LiveView classes */
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
