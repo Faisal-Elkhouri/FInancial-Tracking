@@ -35,4 +35,57 @@ defmodule FinancialTrackingWeb.ConnCase do
     FinancialTracking.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Setup helper that registers and logs in users.
+
+      setup :register_and_log_in_user
+
+  It stores an updated connection and a registered user in the
+  test context.
+  """
+  def register_and_log_in_user(%{conn: conn} = context) do
+    user = FinancialTracking.AccountsFixtures.user_fixture()
+    scope = FinancialTracking.Accounts.Scope.for_user(user)
+
+    opts =
+      context
+      |> Map.take([:token_authenticated_at])
+      |> Enum.into([])
+
+    %{conn: log_in_user(conn, user, opts), user: user, scope: scope}
+  end
+
+  @doc """
+  Like `register_and_log_in_user/1`, but the user is an admin.
+
+      setup :register_and_log_in_admin
+  """
+  def register_and_log_in_admin(%{conn: conn}) do
+    admin = FinancialTracking.AccountsFixtures.admin_fixture()
+    scope = FinancialTracking.Accounts.Scope.for_user(admin)
+
+    %{conn: log_in_user(conn, admin), admin: admin, scope: scope}
+  end
+
+  @doc """
+  Logs the given `user` into the `conn`.
+
+  It returns an updated `conn`.
+  """
+  def log_in_user(conn, user, opts \\ []) do
+    token = FinancialTracking.Accounts.generate_user_session_token(user)
+
+    maybe_set_token_authenticated_at(token, opts[:token_authenticated_at])
+
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> Plug.Conn.put_session(:user_token, token)
+  end
+
+  defp maybe_set_token_authenticated_at(_token, nil), do: nil
+
+  defp maybe_set_token_authenticated_at(token, authenticated_at) do
+    FinancialTracking.AccountsFixtures.override_token_authenticated_at(token, authenticated_at)
+  end
 end

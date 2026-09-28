@@ -1,2 +1,2 @@
-Config.CSP: Missing Content-Security-Policy,lib/financial_tracking_web/router.ex:10,10857FF
+Config.CSP: Missing Content-Security-Policy,lib/financial_tracking_web/router.ex:12,581A748
 Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077

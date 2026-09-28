@@ -5,6 +5,8 @@ defmodule FinancialTrackingWeb.Layouts do
   """
   use FinancialTrackingWeb, :html
 
+  alias FinancialTracking.Accounts.Scope
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -43,22 +45,89 @@ defmodule FinancialTrackingWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <main class={[
-      "px-4 sm:px-6 lg:px-8",
-      if(@full_width, do: "flex flex-col py-8 lg:h-dvh", else: "py-20")
-    ]}>
-      <div class={
-        if(@full_width,
-          do: "flex min-h-0 flex-1 flex-col gap-4",
-          else: "mx-auto max-w-2xl space-y-4"
-        )
-      }>
-        {render_slot(@inner_block)}
-      </div>
-    </main>
+    <div class={["flex flex-col", @full_width && "lg:h-dvh"]}>
+      <.top_nav :if={@current_scope} current_scope={@current_scope} />
+
+      <main class={[
+        "px-4 sm:px-6 lg:px-8",
+        if(@full_width, do: "flex min-h-0 flex-1 flex-col py-8", else: "py-16")
+      ]}>
+        <div class={
+          if(@full_width,
+            do: "flex min-h-0 flex-1 flex-col gap-4",
+            else: "mx-auto max-w-2xl space-y-4"
+          )
+        }>
+          {render_slot(@inner_block)}
+        </div>
+      </main>
+    </div>
 
     <.flash_group flash={@flash} />
     """
+  end
+
+  # The bar across the top of every page for a logged-in user. On phones the
+  # account links collapse to icons (their labels stay for screen readers).
+  attr :current_scope, :map, required: true
+
+  defp top_nav(assigns) do
+    ~H"""
+    <header class="shrink-0 border-b border-base-content/10">
+      <nav
+        aria-label="Main"
+        class="flex h-12 items-center gap-1 px-2 text-sm sm:px-4 lg:px-6"
+      >
+        <.link
+          navigate={~p"/"}
+          id="nav-home"
+          class={[nav_link_class(), "mr-2 font-semibold text-base-content"]}
+        >
+          <.icon name="hero-banknotes" class="size-5" />
+          <span class="sr-only sm:not-sr-only">Financial Tracking</span>
+        </.link>
+        <.link navigate={~p"/purchases"} id="nav-purchases" class={nav_link_class()}>
+          Purchases
+        </.link>
+        <.link
+          :if={Scope.admin?(@current_scope)}
+          navigate={~p"/admin/users"}
+          id="nav-admin-users"
+          class={nav_link_class()}
+        >
+          Users
+        </.link>
+
+        <div class="ml-auto flex min-w-0 items-center gap-1">
+          <span
+            id="nav-user-email"
+            class="hidden truncate px-2 text-base-content/60 md:inline"
+          >
+            {@current_scope.user.email}
+          </span>
+          <.link navigate={~p"/users/settings"} id="nav-settings" class={nav_link_class()}>
+            <.icon name="hero-cog-6-tooth-micro" class="size-4 sm:hidden" />
+            <span class="sr-only sm:not-sr-only">Settings</span>
+          </.link>
+          <.link
+            href={~p"/users/log-out"}
+            method="delete"
+            id="nav-log-out"
+            class={nav_link_class()}
+          >
+            <.icon name="hero-arrow-right-start-on-rectangle-micro" class="size-4 sm:hidden" />
+            <span class="sr-only sm:not-sr-only">Log out</span>
+          </.link>
+        </div>
+      </nav>
+    </header>
+    """
+  end
+
+  defp nav_link_class do
+    "inline-flex shrink-0 items-center gap-2 rounded-field px-2 py-1.5 text-base-content/75 " <>
+      "transition-colors duration-150 hover:bg-base-content/6 hover:text-base-content " <>
+      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
   end
 
   @doc """

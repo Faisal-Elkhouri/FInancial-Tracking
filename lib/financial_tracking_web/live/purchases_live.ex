@@ -3,10 +3,14 @@ defmodule FinancialTrackingWeb.PurchasesLive do
   Table of purchases for a single office. The office is picked from a dropdown
   and kept in the URL (`/purchases?office_id=3`), so a selection can be
   bookmarked or shared.
+
+  Only offices the user has access to are listed. An `office_id` for any
+  other office is treated as one that doesn't exist.
   """
 
   use FinancialTrackingWeb, :live_view
 
+  alias FinancialTracking.Accounts.Scope
   alias FinancialTracking.Tracker
 
   @impl true
@@ -14,7 +18,7 @@ defmodule FinancialTrackingWeb.PurchasesLive do
     {:ok,
      socket
      |> assign(:page_title, "Purchases")
-     |> assign(:offices, Tracker.list_offices())
+     |> assign(:offices, Tracker.list_offices(socket.assigns.current_scope))
      |> stream_configure(:purchases, dom_id: &"purchases-#{&1.id}")}
   end
 
@@ -57,7 +61,8 @@ defmodule FinancialTrackingWeb.PurchasesLive do
   end
 
   defp show_office(socket, office) do
-    purchases = if office, do: Tracker.list_office_purchases(office), else: []
+    scope = socket.assigns.current_scope
+    purchases = if office, do: Tracker.list_office_purchases(scope, office), else: []
 
     socket
     |> assign(:office, office)
@@ -70,7 +75,7 @@ defmodule FinancialTrackingWeb.PurchasesLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} full_width>
+    <Layouts.app flash={@flash} current_scope={@current_scope} full_width>
       <.header>
         Purchases
         <:subtitle :if={@office}>
@@ -98,7 +103,11 @@ defmodule FinancialTrackingWeb.PurchasesLive do
       </.header>
 
       <p :if={@offices == []} id="no-offices">
-        There are no offices yet. Add an office before viewing purchases.
+        <%= if Scope.admin?(@current_scope) do %>
+          There are no offices yet. Add an office before viewing purchases.
+        <% else %>
+          You don't have access to any offices yet. Ask an administrator to give you access.
+        <% end %>
       </p>
 
       <p :if={@offices != [] && is_nil(@office)} id="no-office-selected">

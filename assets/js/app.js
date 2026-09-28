@@ -38,6 +38,19 @@ window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page
+// Copies `detail.text` to the clipboard, e.g.
+// phx-click={JS.dispatch("phx:copy", detail: %{text: "..."})}. The clicked
+// element gets a `data-copied` attribute for two seconds so it can show
+// feedback with Tailwind's `group-data-copied:` variants. The clipboard API
+// only exists in secure contexts (https or localhost).
+window.addEventListener("phx:copy", ({target, detail}) => {
+  navigator.clipboard?.writeText(detail.text).then(() => {
+    target.setAttribute("data-copied", "")
+    clearTimeout(target.copiedTimer)
+    target.copiedTimer = setTimeout(() => target.removeAttribute("data-copied"), 2000)
+  })
+})
+
 liveSocket.connect()
 
 // expose liveSocket on window for web console debug logs and latency simulation:

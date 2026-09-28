@@ -7,12 +7,19 @@ defmodule FinancialTracking.Tracker do
   notebooks, and scripts call these functions — they never touch `Repo` or
   build changesets directly. See docs/INFRASTRUCTURE.md §10 for the
   architecture conventions this enforces.
+
+  Functions that take a `%Scope{}` first only return what that user may
+  access (see `FinancialTracking.Accounts.office_roles/1`); the web layer
+  must use those. The scope-free versions are for trusted callers: notebooks,
+  seeds, and tests.
   """
 
   import Ecto.Query, warn: false
   import Ecto.Changeset, only: [change: 1, change: 2, foreign_key_constraint: 3]
 
   alias Ecto.Multi
+  alias FinancialTracking.Accounts
+  alias FinancialTracking.Accounts.Scope
   alias FinancialTracking.Repo
 
   alias FinancialTracking.Tracker.{
@@ -28,6 +35,16 @@ defmodule FinancialTracking.Tracker do
 
   def list_offices do
     Repo.all(from o in Office, order_by: o.name)
+  end
+
+  @doc """
+  Lists the offices the scope can see, sorted by name.
+  """
+  def list_offices(%Scope{} = scope) do
+    case Accounts.visible_office_ids(scope) do
+      :all -> list_offices()
+      ids -> Repo.all(from o in Office, where: o.id in ^ids, order_by: o.name)
+    end
   end
 
   def get_office!(id), do: Repo.get!(Office, id)
@@ -81,6 +98,10 @@ defmodule FinancialTracking.Tracker do
     |> foreign_key_constraint(:projects,
       name: "project_offices_office_id_fkey",
       message: "office is still assigned to projects"
+    )
+    |> foreign_key_constraint(:memberships,
+      name: "office_memberships_office_id_fkey",
+      message: "office still has members"
     )
     |> Repo.delete()
   end
@@ -196,6 +217,14 @@ defmodule FinancialTracking.Tracker do
         where: p.origin_office_id == ^office_id and not p.deleted,
         order_by: [desc: p.purchased_at, desc: p.id]
     )
+  end
+
+  @doc """
+  Like `list_office_purchases/1`, but returns `[]` unless the scope may view
+  `office`.
+  """
+  def list_office_purchases(%Scope{} = scope, %Office{} = office) do
+    if Accounts.can?(scope, :view, office), do: list_office_purchases(office), else: []
   end
 
   def get_purchase!(id) do

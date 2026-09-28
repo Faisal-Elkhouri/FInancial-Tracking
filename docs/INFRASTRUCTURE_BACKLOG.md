@@ -66,7 +66,12 @@ probes there instead.
 
 ## 2. TLS / reverse proxy
 
-**Status:** deferred by choice. **Blocking for:** any real deployment.
+**Status:** deferred by choice. **Blocking for:** any real deployment —
+and now that there are real logins (§10.5 of `INFRASTRUCTURE.md`),
+passwords and session cookies would cross the wire in clear text without it.
+The temporary-password "Copy" button also needs a secure context (the
+clipboard API is https/localhost only); the password stays selectable
+without it.
 
 `compose.prod.yaml` serves plain HTTP. That is fine for a local rehearsal and
 unacceptable for a financial app on a network: session cookies and balances

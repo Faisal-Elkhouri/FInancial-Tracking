@@ -524,6 +524,15 @@ web layer (controllers / LiveViews)  →  context (Tracker)  →  schemas + Repo
 - A new domain area (e.g. accounts, reporting) gets its **own** context
   module — don't let `Tracker` become a junk drawer. Rule of thumb: if two
   groups of functions never share schemas, they're two contexts.
+  (`FinancialTracking.Accounts` is the first: users, sessions, and office
+  access. See §10.5.)
+- **The web layer passes `@current_scope` first.** LiveViews and
+  controllers call the scope-taking Tracker functions
+  (`Tracker.list_offices(scope)`, `Tracker.list_office_purchases(scope, office)`),
+  which only return what that user may access. The scope-free versions exist
+  for trusted callers — notebooks, seeds, tests — and must not be called from
+  a LiveView. New write operations check
+  `Accounts.can?(scope, :edit, office)` before touching anything.
 - Test fixtures (`test/support/fixtures/tracker_fixtures.ex`) also go
   through the context, so tests exercise the same code paths as the app.
 
@@ -554,6 +563,8 @@ Policy (implemented in migration `20260703120000_restrict_financial_fks`):
 | `project_offices.office_id` → offices | `:restrict` | An office can't be deleted while a project is assigned to it; unassign it first |
 | `project_offices.project_id` → projects | `:delete_all` | Deliberate: a link row is meaningless without its project (projects are soft-deleted in practice, so this only fires on a hard delete) |
 | `executive_budget.parent_line_item_id` → itself | `:nilify_all` | Deliberate: deleting a parent line item *promotes* its children to top level |
+| `office_memberships.office_id` → offices | `:restrict` | An office can't be deleted while someone has access to it; revoke access first |
+| `office_memberships.user_id` → users | `:delete_all` | Deliberate: a grant is meaningless without its user (users are deactivated, not deleted, so this only fires on a hard delete) |
 
 Rules for new foreign keys:
 
@@ -579,3 +590,38 @@ office FKs were `:nilify_all`. If you find old branches, notes, or
 notebooks referring to `Tracker.Offices`, `Tracker.Purchases`, or
 `Utilities`/`Utilites` — that's the pre-restructuring world; the
 functionality now lives in `FinancialTracking.Tracker`.
+
+### 10.5 Accounts and permissions
+
+Built on `mix phx.gen.auth` (Phoenix 1.8), trimmed to what works without
+email delivery:
+
+- **No sign-up, no magic links, no self-service email change or reset.**
+  An admin creates each account at `/admin/users`; the app generates a
+  temporary password, shows it once, and the user must replace it at first
+  login (`UserAuth` on_mount `:require_password_changed`). Admins also
+  change emails and reset passwords. The removed flows can be regenerated
+  once a mail provider is configured.
+- **The first admin** comes from the release shell (no Mix in prod):
+
+  ```sh
+  docker compose -f compose.prod.yaml run --rm migrate \
+    /app/bin/financial_tracking eval 'FinancialTracking.Release.create_admin("you@example.com")'
+  ```
+
+  In dev, `priv/repo/seeds.exs` creates `admin@example.com` and prints its
+  temporary password.
+- **Permissions are per office.** `office_memberships` grants a user
+  `viewer` or `editor` on an office, and the grant covers every sub-office
+  beneath it; where grants overlap the stronger role wins
+  (`Accounts.office_roles/1`). `users.admin` grants everything, plus user
+  management. Roles are read fresh on every check rather than cached in the
+  scope, so revoking access takes effect on the user's next action.
+- **Users are deactivated, not deleted** (`users.deactivated_at`):
+  deactivation ends their sessions and blocks login, and keeps the row for
+  anything that will reference it later (e.g. an audit trail). An admin
+  can't deactivate or demote themselves, so the app can't lose its last
+  admin by accident.
+- Admin routes live in their own `live_session :require_admin` in the
+  router; `Accounts` admin functions also re-check the database, so a
+  stale scope can't act after a demotion.
